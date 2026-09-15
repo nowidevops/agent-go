@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Agent Go — Settings</title>
+  <style>
+    :root {
+      --bg-primary: #1E1E1E; --bg-secondary: #252526; --bg-tertiary: #2D2D2D;
+      --text-primary: #D4D4D4; --text-secondary: #808080;
+      --accent-blue: #569CD6; --accent-green: #4EC9B0; --accent-red: #F44747;
+      --border-color: #404040;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: "JetBrains Mono", Consolas, monospace; background: var(--bg-primary); color: var(--text-primary); font-size: 14px; }
+    .wrap { max-width: 980px; margin: 0 auto; padding: 28px 24px; }
+    /* View controls: zoom +/- (persisted) and detach-to-floating-window */
+    .viewbar { position: fixed; top: 14px; right: 16px; display: flex; gap: 6px; align-items: center; z-index: 10; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 5px 8px; }
+    .viewbar button { padding: 3px 10px; font-weight: 600; font-size: 13px; }
+    #zoomPct { color: var(--text-secondary); font-size: 11px; min-width: 40px; text-align: center; }
+    h1 { font-size: 20px; color: var(--accent-green); }
+    .card { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 18px; margin-bottom: 16px; }
+    label { display: block; margin: 14px 0 5px; color: var(--text-secondary); font-size: 12px; }
+    input, select { width: 100%; background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 9px; font-family: inherit; font-size: 13px; }
+    input:focus, select:focus { outline: 2px solid var(--accent-blue); border-color: var(--accent-blue); }
+    .row { display: flex; gap: 12px; }
+    .row > div { flex: 1; }
+    .actions { display: flex; gap: 10px; align-items: center; margin-top: 6px; }
+    button { background: var(--accent-blue); color: #fff; border: none; border-radius: 6px; padding: 9px 18px; cursor: pointer; font-family: inherit; font-weight: 600; }
+    button.secondary { background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border-color); }
+    #msg { color: var(--accent-green); font-size: 12px; }
+    .hint { color: var(--text-secondary); font-size: 11px; margin-top: 4px; }
+    /* Links: the browser default (#0000EE / visited purple) is unreadable on the dark ground. */
+    a, a:visited { color: var(--accent-blue); text-decoration: underline; text-underline-offset: 2px; }
+    a:hover, a:focus-visible { color: #8CC3F0; }
+    .models { color: var(--text-secondary); font-size: 11px; margin-top: 8px; word-break: break-word; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .pw-wrap { position: relative; display: flex; }
+    .pw-wrap input { flex: 1; padding-right: 52px; }
+    .pw-toggle { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); padding: 3px 8px; font-size: 11px; background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-secondary); border-radius: 5px; cursor: pointer; font-weight: 500; }
+    .pw-toggle:hover { color: var(--text-primary); }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; background: var(--bg-tertiary); border: 1px solid var(--border-color); }
+    .badge.tier { color: var(--accent-yellow, #DCDCAA); border-color: var(--accent-yellow, #DCDCAA); }
+    .badge.credits { color: var(--accent-green); border-color: var(--accent-green); }
+    .hidden { display: none; }
+    .btn-danger { color: var(--accent-red) !important; border-color: var(--accent-red) !important; }
+    .status { padding: 8px 12px; border-radius: 6px; border-left: 3px solid var(--accent-blue); background: var(--bg-tertiary); margin-top: 10px; font-size: 12px; display: none; }
+    .status.show { display: block; }
+    .status.ok { border-left-color: var(--accent-green); }
+    .status.err { border-left-color: var(--accent-red); color: var(--accent-red); }
+  </style>
+</head>
+<body>
+  <div class="viewbar">
+    <button class="secondary" id="zoomOut" title="Zoom out">−</button>
+    <span id="zoomPct">100%</span>
+    <button class="secondary" id="zoomIn" title="Zoom in">+</button>
+    <button class="secondary" id="zoomReset" title="Reset zoom to 100%">Reset</button>
+    <button class="secondary" id="detachBtn" title="Open Settings in its own floating window">⧉ Detach</button>
+  </div>
+  <div class="wrap">
+    <h1>Agent Go — Settings</h1>
+
+    <!-- "A newer pack is available" (2026-09-03). Filled by renderUpdateNotice() in options.js from the
+         stored daily check; hidden until a newer version is known. -->
+    <div class="card" id="updateCard" style="display:none;border-color:var(--accent-green)">
+      <h2 style="font-size:15px;color:var(--accent-green);margin:0 0 6px">Update available</h2>
+      <div id="updateText" style="font-size:12px;margin-bottom:8px"></div>
+      <div class="hint" id="updateSteps" style="margin:0 0 10px"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button id="updateDownloadBtn" type="button">Open the download page</button>
+        <button id="updateDismissBtn" type="button" style="background:var(--bg-tertiary);color:var(--text-primary);border:1px solid var(--border-color)">Not now</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <!-- ===== Agent Go: account, plan, model, BYOK (cloud sibling — no local Ollama, no vendor keys) ===== -->
+      <h2 style="font-size:15px;color:var(--accent-green);margin:0 0 6px">Account</h2>
+      <div id="signedOut">
+        <div class="grid2">
+          <input id="email" type="email" placeholder="email" autocomplete="username" />
+          <div class="pw-wrap">
+            <input id="password" type="password" placeholder="password" autocomplete="current-password" />
+            <button type="button" id="pwToggle" class="pw-toggle" aria-label="Show password">Show</button>
+          </div>
+        </div>
+        <div class="actions" style="margin-top:10px">
+          <button id="signInBtn">Sign in</button>
+          <span class="hint" style="margin-top:0">No account? <a id="createLink" href="#">Create one</a></span>
+        </div>
+      </div>
+      <div id="signedIn" class="hidden">
+        <div class="actions">
+          <span><span id="userEmail">&mdash;</span> &nbsp; <span class="badge tier" id="tierBadge">free</span> <span class="badge credits" id="creditBadge">&mdash; credits</span></span>
+          <a id="adminPanelLink" class="hint" style="display:none;margin:0" href="#" title="Manage who can use Agent Go, pricing, limits and the kill switch">⚙ Admin dashboard</a>
+          <button id="signOutBtn" class="secondary btn-danger">Sign out</button>
+        </div>
+      </div>
+      <div class="status" id="acctStatus" role="status" aria-live="polite"></div>
+      <div class="hint" id="versionLine" style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <span id="versionText">Agent Go —</span>
+        <button id="updateCheckBtn" type="button" style="padding:3px 8px;font-size:11px;background:var(--bg-tertiary);color:var(--text-primary);border:1px solid var(--border-color)">Check for updates</button>
+      </div>
+
+      <h2 style="font-size:15px;color:var(--accent-green);margin:18px 0 6px">Plan &amp; Credits</h2>
+      <div class="hint" style="margin-top:0">Each metered agent turn costs credits. Client-side file / ServiceNow tools are free.</div>
+      <div class="actions" style="margin-top:8px">
+        <button id="buyCreditsBtn">Buy credits</button>
+      </div>
+
+      <h2 style="font-size:15px;color:var(--accent-green);margin:18px 0 6px">Model</h2>
+      <label>Agent model</label>
+      <select id="model"><option value="">Auto (best for your plan)</option></select>
+      <div class="hint">Your plan limits which models are allowed; the backend enforces this. Flagships (Opus / Sol / Gemini Pro) require a paid plan.</div>
+      <div id="backendUrlRow" style="display:none"><!-- admin-only: revealed by refreshAccount() when tier === admin -->
+        <label>Backend URL <span style="color:var(--text-secondary);font-size:11px">(admin only)</span></label>
+        <input id="backendUrl" placeholder="https://ai.nowidevops.com/api/llm-go" />
+      </div>
+
+      <div id="byokCard" style="display:none"><!-- usage/admin tier only: revealed after sign-in -->
+        <h2 style="font-size:15px;color:var(--accent-green);margin:18px 0 6px">Bring your own key</h2>
+        <label>Provider</label>
+        <select id="byokProvider">
+          <option value="">Off — use Agent Go models</option>
+          <option value="openai">OpenAI</option>
+          <option value="anthropic">Anthropic</option>
+          <option value="gemini">Gemini</option>
+          <option value="xai">xAI</option>
+          <option value="custom">Custom — OpenAI-compatible endpoint (OpenRouter / DashScope / Together / Groq / DeepSeek…)</option>
+        </select>
+        <div id="byokModelRow" style="display:none">
+          <label>Model</label>
+          <input id="byokModel" list="byokModelList" placeholder="Select or type a model id" autocomplete="off" />
+          <datalist id="byokModelList"></datalist>
+        </div>
+        <div id="byokBaseUrlRow" style="display:none">
+          <label>Custom endpoint base URL</label>
+          <input id="byokBaseUrl" placeholder="https://openrouter.ai/api/v1" autocomplete="off" />
+          <div class="hint">Any OpenAI-compatible chat-completions host; <code>/chat/completions</code> is appended automatically. The Agent Go service makes the call for you, so the host must be exactly one it knows (no subdomains, no port): <span id="byokHostList">openrouter.ai, dashscope-intl.aliyuncs.com, dashscope.aliyuncs.com, api.together.xyz, api.groq.com, api.deepseek.com, api.mistral.ai, api.fireworks.ai, api.perplexity.ai, api.cerebras.ai, integrate.api.nvidia.com, api.moonshot.ai, api.moonshot.cn, api.x.ai</span>. https only. A model on your own machine (vLLM, Ollama) cannot be reached from the service.</div>
+        </div>
+        <div id="byokKeyRow" style="display:none">
+          <label>API key</label>
+          <div class="pw-wrap">
+            <input id="byokKey" type="password" placeholder="paste your provider API key, or load it from a file" autocomplete="off" />
+            <button type="button" id="byokKeyToggle" class="pw-toggle" aria-label="Show API key">Show</button>
+          </div>
+          <!-- Key import (2026-09-03): .env / JSON / any NAME=value text, parsed on this machine (byok-env.js). -->
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px">
+            <button type="button" id="byokLoadFile" style="background:var(--bg-tertiary);color:var(--text-primary);border:1px solid var(--border-color)">⤓ Load key from a file (.env, JSON…)</button>
+            <span class="hint" id="byokFileStatus" style="margin:0" role="status" aria-live="polite"></span>
+          </div>
+          <div class="hint">Reads OPENAI_API_KEY / ANTHROPIC_API_KEY / GEMINI_API_KEY / XAI_API_KEY (and common aliases) from a <code>.env</code>, a JSON file, or any text with <code>NAME=value</code> lines, so you never type a key by hand. If a folder is granted under Local files and it holds a <code>.env</code>, that is used first (and, when you switch provider with an empty key field, it is read again silently); otherwise you pick the file. Parsed on this machine only; then click Save.</div>
+        </div>
+        <div id="byokEffortRow" style="display:none">
+          <label>Reasoning effort</label>
+          <select id="byokEffort">
+            <option value="">Provider default</option>
+            <option value="low">Low — fastest, cheapest</option>
+            <option value="medium">Medium</option>
+            <option value="high">High — deepest reasoning (more of your tokens)</option>
+          </select>
+        </div>
+        <div class="hint">Run the agent on <b>your own</b> provider account: pick a provider, pick (or type) any of its models, and paste your API key. Model/token usage is billed to <b>your</b> provider account; Agent Go charges a flat $0.05 trigger fee per turn. The key is stored on this machine only (never synced). The phase engine is disabled while BYOK is active.</div>
+      </div>
+
+      <!-- Advanced settings (owner directive 2026-09-03): the local machine bridges are for every
+           user who installs them, not just admins. Collapsed by default; nothing here is on until
+           the user turns it on, and every desktop / shell action still asks for approval. -->
+      <details id="advancedLocal" style="margin-top:18px;border:1px solid var(--border-color);border-radius:6px;padding:8px 12px">
+      <summary style="cursor:pointer;font-size:15px;color:var(--accent-green);font-weight:600">Advanced settings — local machine bridges (optional)</summary>
+      <div class="hint" style="margin:6px 0 10px">For users who want the agent to reach beyond the browser tab: voice input through a local Whisper server, OS-level mouse/keyboard/screenshots, and shell commands, each through a small bridge that runs on <b>your</b> machine and answers only on loopback. Download the bridges pack from the Agent Go page (“Local machine bridges”), follow its INSTALL.md, then fill in the fields below. The two powerful options (desktop control, Run commands) are OFF until you switch them on and need the desktop token; every desktop or shell action asks for your approval first. Both URLs must point at this machine (<code>localhost</code> / <code>127.0.0.1</code>). The desktop token is what keeps other programs on this computer from using the desktop bridge: treat it like a password. What the agent sees through these bridges (screenshots, command output, transcribed speech) is sent to the model you use, like everything else it reads.</div>
+
+      <label>Local Whisper server URL (voice input)</label>
+      <input id="whisperUrl" placeholder="http://localhost:8765" />
+      <div class="hint">Start it with whisper-server\start-whisper.bat. If it's not running, voice input falls back to Chrome's Web Speech (cloud).</div>
+      <div class="actions" style="margin-top:6px">
+        <button class="secondary" id="testWhisper" type="button">Test</button>
+        <span id="whisperStatus" class="hint" style="margin-top:0"></span>
+      </div>
+
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="desktopControlEnabled" style="width:auto" />
+        🖥️ Enable desktop control — OS mouse / keyboard / screenshot (opt-in)
+      </label>
+      <div class="hint"><strong>OFF by default — powerful.</strong> When ON, the agent gets <code>desktop_*</code> tools that drive the <strong>whole Windows desktop</strong> (native apps, taskbar, other windows), not just the browser tab. Every mouse/keyboard action still asks for your approval, and on the M1 real-money page these are hard-blocked. Needs the local bridge — run <code>desktop-server\start-desktop.bat</code>. When OFF, the tools are hidden from the model and refused at the executor. FAILSAFE: slam the mouse into a screen corner to abort.</div>
+
+      <label>Desktop control server URL</label>
+      <input id="desktopUrl" placeholder="http://localhost:8777" />
+      <div class="hint">Loopback-only bridge started by <code>desktop-server\start-desktop.bat</code>. Only used when desktop control is enabled above.</div>
+      <div class="actions" style="margin-top:6px">
+        <button class="secondary" id="testDesktop" type="button">Test</button>
+        <span id="desktopStatus" class="hint" style="margin-top:0"></span>
+      </div>
+
+      <label>Desktop token (REQUIRED for desktop control / Run commands)</label>
+      <input id="desktopToken" type="password" placeholder="paste the token from the desktop-server console" autocomplete="off" />
+      <div class="hint"><strong>Required.</strong> The desktop-server now generates a mandatory shared secret at startup — it's printed on the server console and stored in <code>desktop-server/.desktop-token</code>. Paste it here (each Chrome profile separately); it's sent as <code>X-Desktop-Token</code> on every call and stored machine-locally (never synced). Without it, every desktop-control and Run-command call returns 401.</div>
+
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="commandExecEnabled" style="width:auto" />
+        ⌨️ Enable Run commands — shell (npm / git / tests / builds) via <code>run_command</code> (opt-in)
+      </label>
+      <div class="hint"><strong>OFF by default — very powerful.</strong> When ON, the agent gets <code>run_command</code> to run shell commands (npm, git, node, python, tests, builds, linters) on your machine and read their output — so it can VERIFY code changes. Separate from desktop control because shell exec is even more powerful. Needs the same <code>desktop-server</code> running (and token above). Every command asks for your approval first. A denylist blocks OS-destructive patterns, but an approved command runs with your full privileges — like a terminal.</div>
+
+      <label>Project directory (working dir for Run commands)</label>
+      <input id="projectDir" placeholder="C:\projects\my-app" autocomplete="off" />
+      <div class="hint"><code>run_command</code>'s default working directory. The browser hides the connected folder's real OS path, so set your repo root here (or the agent must pass an explicit cwd). Also where <code>git</code> runs.</div>
+      </details><!-- /advancedLocal -->
+
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="snPackEnabled" style="width:auto" />
+        Inject the ServiceNow knowledge pack (opt-in)
+      </label>
+      <div class="hint">Off by default. When ON, ServiceNow tasks (or a service-now.com tab) get the "use real APIs only" rules PLUS the artifact-matched API reference pack (sn-api-packs/*.md — the same packs local-llm-masters injects; matched from the task wording, e.g. "business rule" &rarr; business-rules.md, default core-glide.md). Needs the main app server for the live packs; falls back to bundled rules alone. When OFF, nothing is injected.</div>
+
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="wfPackEnabled" style="width:auto" />
+        ServiceNow Legacy Workflow pack (opt-in)
+      </label>
+      <div class="hint">Off by default. When ON, tasks about LEGACY (Classic) Workflows — wf_* tables, the workflow_ide.do editor, checkout/publish — get a bundled pack with the wf_* data model, the REST-first ordered insert plan (server business rules auto-scaffold Begin/End and exit conditions), the checkout&rarr;validate&rarr;publish lifecycle, and an activity quick-reference. Injects on top of the ServiceNow pack (enable both).</div>
+
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="wfsPackEnabled" style="width:auto" />
+        ServiceNow Workflow Studio pack (opt-in)
+      </label>
+      <div class="hint">Off by default. When ON, tasks about the MODERN builder — Workflow Studio / Flow Designer flows, subflows, actions, triggers, playbooks, decision tables (sys_hub_* / sys_pd_* / sys_decision*) — get a bundled pack with the concept map + data model, the honest REST-safe vs UI-only line (graph authoring goes through the Studio UI; the engine runs a compiled snapshot), Studio SPA navigation recipes with verify-after-mutation REST queries, and REST-safe decision-table row CRUD. Injects on top of the ServiceNow pack (enable both).</div>
+
+      <!-- ADMIN-ONLY (owner directive 2026-09-02): Fable behavior pack + day-trading + M1 Finance settings are hidden for every
+           non-admin tier. options.js reveals this block from refreshAccount() when the signed-in tier is
+           "admin", and the Save handler forces these settings OFF whenever the block is hidden. -->
+      <div id="adminOnlyPacks" style="display:none">
+      <div class="hint" style="margin:6px 0 2px;color:var(--accent-orange, #CE9178)">🔒 Admin-only: Fable behavior pack, day-trading and M1 Finance packs</div>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="fablePackEnabled" style="width:auto" />
+        Inject the "act like Fable 5.1" behavior pack (opt-in)
+      </label>
+      <div class="hint">Off by default. When ON, every task gets Fable 5.1's operating discipline (diagnose first, real data over assumptions, verify before claiming done, stop at irreversible steps). Read LIVE from fable-behavior.md at the URL below; a bundled copy is used if unreachable.</div>
+
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="tradingPackEnabled" style="width:auto" />
+        Inject the PAPER day-trading agent pack (opt-in)
+      </label>
+      <div class="hint">Off by default. URL-gated to the Day Trading page only. Default mode = read / analyze ONLY (the pack hard-forbids placing orders unless PREFILL/SUBMIT below is enabled). Recommends trades against numeric rules, reports every decision in its answer (server auto-records submitted orders; no manual journaling), honors the server's CORE4 scanner-signal gate and is aware of the ORB Stocks-in-Play engine rows, and stays on PAPER. Read LIVE from trading-strategy.md at the URL below; a bundled copy is used if unreachable.</div>
+
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="scalpingPackEnabled" style="width:auto" />
+        Day-trading agent: SCALPING overlay (opt-in)
+      </label>
+      <div class="hint">Off by default. Requires the day-trading agent pack above (does nothing on its own). When ON, a scalping STRATEGY overlay is appended after the trading pack: mega-liquid candidates only, tape-driven entries, tighter stops (fraction of ATR), an explicit ~15-min time-stop, one scalp at a time. Strategy-layer only — it can NEVER relax the mode (analyze/prefill/submit), tradability floor, scanner-signal gate, sizing, R:R minimum, or any server brake. Read LIVE from scalping-strategy.md at the URL below; a bundled copy is used if unreachable.</div>
+
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="tradingPrefillEnabled" style="width:auto" />
+        Day-trading agent: PREFILL the order form (Phase 2)
+      </label>
+      <div class="hint">Off by default. Requires the day-trading agent pack above. When ON, the agent may FILL the Place Manual Order form (symbol, side, qty, type, stop, target) but is hard-blocked from clicking "Submit Order" — it stages the order for YOU to review and submit. The submit-guard lives in code, not the strategy file.</div>
+
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="paperOrderSubmissionEnabled" style="width:auto" />
+        ⚠️ Day-trading agent: AUTONOMOUS submit (PAPER)
+      </label>
+      <div class="hint"><strong>OFF by default — turn on only deliberately.</strong> When ON, the agent fills the form, runs the dry-run Validate, and <strong>clicks Submit Order itself</strong> on the PAPER account (no human click). It still must pass the server-side brakes (paper-only, R:R, sizing, lockout, market hours). When OFF, the Submit Order button is hard-blocked for the agent at the tool level. Stored locally on this machine only (never synced). PAPER only.</div>
+
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="riskPostureEnabled" style="width:auto" />
+        Day-trading agent: risk posture — tighten session max loss (default on)
+      </label>
+      <div class="hint"><strong>ON by default</strong> because it can only REDUCE risk. Gives the agent the <code>set_session_max_loss</code> tool (prefill/submit modes only): it may TIGHTEN today's session max-loss cap on market insights (VIX spike, choppy tape, losing morning). Server-enforced: can NEVER loosen past your dashboard max-loss ceiling, floor $100, max 3 changes/day with 5 min between, every change audited with a rationale, auto-expires at the ET session boundary. The hard BLOCK/FLATTEN ladder and stage selection stay operator-only. Turn OFF to remove the tool entirely.</div>
+
+      <div style="margin-top:8px">
+        <label>Day-trading: extra excluded symbols (never day-trade)</label>
+        <input id="additionalExcludedSymbols" type="text" placeholder="e.g. PYPL, UBER, DIS" />
+        <div class="hint">Comma-separated. Day-trade exclusions ADDED to the built-in long-term-holding list (AMD, GOOGL, MSFT, NVDA, META, TSM, CRM, ADBE, PLTR, COST, BRK.B, JNJ). Use this as your long-term portfolio changes. This list can only EXTEND the exclusion — it can't remove a built-in name. Broad ETFs (SPY/QQQ/VOO) are intentionally never excluded (regime proxies).</div>
+      </div>
+
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="m1PackEnabled" style="width:auto" />
+        💰 M1 Finance portfolio explorer — READ-ONLY (real-money 401k)
+      </label>
+      <div class="hint"><strong>OFF by default.</strong> URL-gated to <code>dashboard.m1.com/d/invest/&hellip;/portfolio</code> only. This is your <strong>real-money 401(k)</strong>, so when ON the run is pinned to a <strong>fail-closed read-only tool allowlist</strong>: the agent gets ONLY read tools (read_page, query_elements, scroll, screenshot, web_search) — clicking, typing, navigation, trading, rebalancing, Pie edits, transfers, sub-agents, and login/auth are all <strong>mechanically impossible</strong>, not just discouraged. It explores what's working / profitable in your holdings and writes an insight report. Log in yourself first. Prefer a LOCAL model (cloud models would see your account data).</div>
+      </div><!-- /adminOnlyPacks -->
+
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="teamsPackEnabled" style="width:auto" />
+        💬 Teams auto-reply drafter — READ-ONLY (opt-in)
+      </label>
+      <div class="hint"><strong>OFF by default.</strong> URL-gated to <code>teams.cloud.microsoft</code> / <code>teams.microsoft.com</code>. When ON, the agent reads the <strong>5 most recent messages</strong> in the currently open channel or 1:1 chat and <strong>drafts a context-inferred reply into the compose box</strong> — but it is <strong>hard-forbidden from posting or sending</strong> anything until you type the exact phrase <code>APPROVED — SEND IT</code>. No partial match, no "go ahead", no "yes" unlocks it. It never presses Enter/Ctrl+Enter to submit, never edits/reacts to/forwards existing messages, and never changes Teams settings. Open the conversation yourself first. Reads private messages — <strong>prefer a LOCAL model</strong> (cloud models would see your Teams content).</div>
+
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="slackPackEnabled" style="width:auto" />
+        💬 Slack auto-reply drafter — READ-ONLY (opt-in)
+      </label>
+      <div class="hint"><strong>OFF by default.</strong> URL-gated to <code>app.slack.com</code> / <code>slack.com</code>. When ON, the agent enumerates the human-to-human messages in the open channel, you pick one, and it <strong>drafts a reply and types it into the composer</strong> — but it is <strong>hard-forbidden from sending anything until you type the exact phrase APPROVED — SEND IT</strong> (same gate as the Teams pack; the side panel offers a one-click approval button). No partial match, no "go ahead", no "yes" unlocks it. Without the phrase it never clicks the Send button, never calls a <code>send_*</code> tool, and never presses Enter while the composer has focus (Enter sends in Slack — and stays forbidden even after approval; the approved send is one click of the send arrow, then a read-back verification). <code>fill_input</code> is always called with <code>submit: false</code>. It never edits/deletes/reacts to existing messages and never auto-loops without your confirmation. Open the channel yourself first. Reads private messages — <strong>prefer a LOCAL model</strong> (cloud models would see your Slack content).</div>
+
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="unslopPackEnabled" style="width:auto" />
+        ✍️ Unslop writing-quality pack — <strong>ON by default</strong>
+      </label>
+      <div class="hint"><strong>ON by default</strong> (the only always-on pack — owner directive 2026-08-19). Injects a compact (~2KB) edit-pass rule set on <strong>every run</strong> so all final prose (replies, documents, summaries, emails) is stripped of AI tells before posting: puffery/promo vocabulary, "serves as / boasts", "not just X but Y", em dashes, chatbot phrases, filler, abstract metaphor jargon — plus plain-speech rules (active voice, say the mechanism or number, add voice/rhythm). Code blocks are exempt; documentation prose is not. Style overlay only — it stacks with every other pack and never changes what the agent does. Canonical skill: <code><local path> Untick to disable.</div>
+
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="implementationPhasesEnabled" style="width:auto" />
+        🧭 Inject the "implementation phases" pipeline pack (opt-in)
+      </label>
+      <div class="hint">Off by default. When ON, every non-trivial task runs through the AgenticWorkflow phase pipeline as a self-discipline the agent narrates: <strong>plan → execute (with verify on research steps) → synthesize → review → reverify → repair → clarify → done</strong>. Trivial tasks collapse to plan→execute→done. The gate semantics carry over — review and reverify are independent (the agent deliberately switches lens so a phase never rubber-stamps its own output), a NO-GO triggers exactly ONE repair pass, and a dead-end surfaces a concrete clarify question instead of a silent ship. Read LIVE from implementation-phases.md at the URL below; a bundled copy is used if unreachable.</div>
+
+      <!-- ADMIN-ONLY (owner directive 2026-09-02): the code-enforced phase engine + role-chain JSON /
+           domain presets multiply the metered turns per task and name models outside the plan;
+           hidden for every non-admin tier, and Save forces the engine OFF for them. -->
+      <div id="adminOnlyPhase" style="display:none">
+      <div class="hint" style="margin:6px 0 2px;color:var(--accent-orange, #CE9178)">🔒 Admin-only: phase engine and role chains</div>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="phaseEngineEnabled" style="width:auto" />
+        🛡️ Phase engine — CODE-enforced review gates <strong style="color:var(--text-secondary)">(opt-in — off by default)</strong> <span id="phaseEngineLockNote" style="display:none;color:var(--accent-orange, #CE9178);font-size:11px">— off &amp; locked while Bring-your-own-key is active</span>
+      </label>
+      <div class="hint"><strong>Opt-in</strong> (off by default) — turn it on per-profile when you want gated runs. When ON, every run passes through the <strong>code-enforced phase pipeline</strong>: PLAN (the orchestrator — your selected header model — decomposes multi-part tasks; single-focus tasks fast-path) → EXECUTE (subtasks with dependency isolation) → SYNTHESIZE → deterministic evidence invariants (every factual claim must cite real tool observations — value mismatches and uncited claims force NO-GO in pure code) → REVIEW + REVERIFY by <strong>independent models</strong> (defaults: glm-5.2:cloud review / deepseek-v4-pro:0813-cloud reverify — ⚠️ :cloud gate models send the draft + evidence to Ollama's servers) → auto-repair → clarify questions if still blocked. When OFF, runs use the plain agent loop. Supersedes the prompt-only "implementation phases" pack above when enabled.</div>
+
+      <label for="phaseModels">Phase-engine role chains (JSON, optional)</label>
+      <label for="phasePreset" style="font-size:11px;color:var(--text-secondary);margin:0 0 4px">Domain preset — pick one to fill the JSON below (then Save):</label>
+      <select id="phasePreset" style="margin-bottom:6px">
+        <option value="">— Empty (defaults / pure Ollama, $0) —</option>
+        <option value="servicenow">ServiceNow Task (Ollama, coding + strict citation)</option>
+        <option value="uiux">UI/UX Design (Claude design taste + Gemini visual)</option>
+        <option value="fitness">Fitness (Gemini + Claude, safety-aware)</option>
+        <option value="stock">Stock Market (Claude-sub + Gemini, strict citation)</option>
+        <option value="other">Other / Deep research (Claude-sub fable/opus + Gemini)</option>
+      </select>
+      <textarea id="phaseModels" rows="4" spellcheck="false" placeholder='{"roles": {"review": [{"provider":"ollama","model":"deepseek-v4-pro:0813-cloud"}], "orchestrator": [{"provider":"$SELECTED","model":"$SELECTED"}]}}'></textarea>
+      <div class="hint">Leave empty for the defaults — PURE Ollama-cloud, matched to each model's strength (subscription-billed, no API keys, no desktop bridge needed): <code>deepseek-v4-pro:0813-cloud</code> (agent workflows + long context) orchestrates + heads repair and reverify, <code>glm-5.2:cloud</code> (highest coding score) heads review, <code>kimi-k2.7-code:cloud</code> (cost) is the gate fallback, (Qwen3-Coder-480B was removed from the gate chains 2026-07-19 — it can't emit the strict verdict grammar and fail-closed every review to NO-GO; it's a strong <em>drafter</em>, so use it as the header model or via the Custom provider, not as a gate.) OpenAI models, fable-5.1 and opus-5 are out of the defaults (slow) but stay selectable here. <code>kimi-k3:cloud</code> (Moonshot's flagship — vision + tools + thinking) is selectable in the Agent-model dropdown and usable in these chains, but is deliberately <strong>not</strong> a default: unlike the other <code>:cloud</code> models it is <strong>not covered by the Max plan</strong> and bills against your Ollama <em>extra usage</em> balance, so putting it in a gate chain meters every gated run (review + reverify + repair) instead of costing $0. Prove it holds the verdict grammar first, then promote it. <code>deepseek-v4-flash:cloud</code> (DeepSeek-V4 preview — MoE, 284B total / 13B activated, tools + thinking, 1M-token context) is also selectable in the Agent-model dropdown and usable in these chains — built for efficient reasoning over long context, so it's a promising fast drafter/researcher; it's a <strong>preview</strong> release, so prove it holds the verdict grammar before promoting it into a gate chain. Roles: <code>orchestrator</code> (PLAN/SYNTHESIZE/CLARIFY), <code>review</code>, <code>reverify</code> (independent gates), <code>repair</code>. Placeholders: <code>$SELECTED</code> = the header model (any provider), <code>$LOCAL</code> = the local Ollama model. Providers: ollama / openai / gemini / anthropic / xai / claude-sub / codex-sub. Invalid JSON is ignored (defaults apply). Options: <code>"gateMode":"strict"</code> (full deterministic-citation enforcement; default is AWF-style — model judgment decides), <code>"maxRepairs":1-5</code> (default 3), <code>"gateWallSec":60-600</code> (per-gate wall clock, default 240).</div>
+      </div><!-- /adminOnlyPhase -->
+
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="autoWebSearch" style="width:auto" />
+        Auto web-search for factual questions (default on)
+      </label>
+      <div class="hint">When ON, the agent automatically uses web_search for questions whose answer isn't on the current page (trends, "what is", current events, prices) — you don't have to say "search". It will NOT search for page actions like filling a form, clicking, or summarizing the open page. Turn off to only search when you explicitly ask; you can also say "don't search, just answer" in any single message.</div>
+
+      <!-- ADMIN-ONLY (owner directive 2026-09-02): local diagnostics + the ServiceNow phase-presets
+           URL (a localhost:3000 dev source) are admin tooling; hidden for every other tier. -->
+      <div id="adminOnlyDiag" style="display:none">
+      <div class="hint" style="margin:6px 0 2px;color:var(--accent-orange, #CE9178)">🔒 Admin-only: diagnostics and knowledge-pack source</div>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="telemetryEnabled" style="width:auto" />
+        Enable local diagnostics (opt-in)
+      </label>
+      <div class="hint">Off by default. When ON, the Diagnostics card below can summarize your stored run history (tool failure rates, step counts, common errors). 100% local — read-only over data already on this machine, nothing is sent anywhere.</div>
+
+      <label>ServiceNow phase-presets URL (knowledge pack source)</label>
+      <input id="phaseFilesUrl" placeholder="http://localhost:3000/sdlc-phases" />
+      <div class="hint">Used only when the pack is enabled above. Read LIVE from phase-08.md/phase-07.md here (no drift); a bundled copy is used if unreachable.</div>
+      <div class="actions" style="margin-top:6px">
+        <button class="secondary" id="testPhase" type="button">Test</button>
+        <span id="phaseStatus" class="hint" style="margin-top:0"></span>
+      </div>
+      </div><!-- /adminOnlyDiag -->
+
+      <div class="row">
+        <div>
+          <label>Temperature</label>
+          <input id="temperature" type="number" step="0.1" min="0" max="2" />
+        </div>
+        <div>
+          <label>Context tokens (num_ctx)</label>
+          <input id="numCtx" type="number" step="512" min="1" />
+          <div class="hint">Default is 32768 so large inputs (code review, full scripts/files) fit. Higher uses more VRAM — on a 30B model / 24GB GPU, 32768 is near the ceiling: if Ollama crashes/OOMs or first-token is very slow, lower it (16384 is a good middle, 8192 is safe). Minimum ~4096 (prompt + tool schemas are ~3.3k tokens). Your exact value is always used — nothing is clamped.</div>
+        </div>
+        <div>
+          <label>Max agent steps (0 = unlimited)</label>
+          <input id="maxSteps" type="number" step="1" min="0" max="200" />
+          <div class="hint">0 = no limit; use the Stop button to halt a run.</div>
+        </div>
+        <div>
+          <label style="display:flex;align-items:center;gap:8px">
+            <input type="checkbox" id="autoExtendSteps" style="width:auto" />
+            Auto-extend step cap when a task is unfinished
+          </label>
+          <div class="hint">When a finite step cap runs out mid-task, the run gets up to 2 automatic extensions (half the original cap each, min 10 steps) with a "finish the remaining work, then answer" nudge — instead of being cut off with required work (e.g. tests) skipped. Never applies to trading or M1 runs, or to sub-agents. Turn OFF to keep hard caps.</div>
+        </div>
+        <div>
+          <label>Sub-agent concurrency (1 = sequential)</label>
+          <input id="subagentConcurrency" type="number" step="1" min="1" max="4" />
+          <div class="hint">How many sub-agents (spawn_subagent) run at once. 1 = one at a time (safe default). On a single GPU, inference is always serialized — raising this only pipelines page/tool work, so only go above 1 if you measure a real speedup. Max 4.</div>
+        </div>
+        <div>
+          <label>📁 Local files (MCP) — max connected folders</label>
+          <input id="maxRoots" type="number" step="1" min="1" max="20" />
+          <div class="hint">How many local folders can be connected at once via <strong>📁 Local files (MCP)</strong> (e.g. a project repo + <code>SN_REF</code> + docs). Address files by prefixing the folder name — <code>read_file "Project Files/README.md"</code>. Default 6, max 20. Each folder is a separate permission that must be re-granted after a Chrome restart.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button id="save">Save</button>
+      <button class="secondary" id="reset">Reset to defaults</button>
+      <span id="msg"></span>
+    </div>
+
+    <details class="card" id="adminOnlyLearning" style="margin-top:22px;display:none"><!-- admin-only (owner directive 2026-09-02): lessons/trajectories are the owner's training data -->
+      <summary style="cursor:pointer;list-style-position:outside">
+        <h2 style="font-size:15px;color:var(--accent-green);margin:0;display:inline">Learning (feedback &amp; lessons) <span style="font-size:11px;color:var(--accent-orange, #CE9178)">🔒 admin-only</span></h2>
+        <span id="lessonCount" style="color:var(--text-secondary);font-size:11px;margin-left:8px"></span>
+      </summary>
+      <p style="font-size:12px;color:var(--text-secondary);margin:10px 0">
+        👍/👎 on each run teaches the agent. Lessons below are injected into its
+        instructions, weighted by reinforcement. Delete any that are wrong.
+      </p>
+      <div id="lessonList" style="font-size:12px"></div>
+      <div class="actions" style="margin-top:12px;flex-wrap:wrap">
+        <button class="secondary" id="exportTraining">Export training data (JSONL)</button>
+        <button class="secondary" id="pruneTrajBtn">Clear trajectories &gt;30 days</button>
+        <button class="secondary" id="clearLessonsBtn">Clear all lessons</button>
+        <span id="learnMsg" style="color:var(--accent-green);font-size:12px"></span>
+      </div>
+    </details>
+
+    <div class="card" id="adminOnlyDiagCard" style="margin-top:22px;display:none"><!-- admin-only (2026-09-02): pairs with telemetryEnabled -->
+      <h2 style="font-size:15px;color:var(--accent-green);margin:0 0 6px">Diagnostics (local only) <span style="font-size:11px;color:var(--accent-orange, #CE9178)">🔒 admin-only</span></h2>
+      <p style="font-size:12px;color:var(--text-secondary);margin:0 0 10px">
+        A read-only summary of your stored run history — which tools fail most, how
+        many steps runs take, and the most common errors. Nothing leaves this machine.
+        Enable "local diagnostics" above (and Save) to use it.
+      </p>
+      <div class="actions" style="margin-bottom:10px">
+        <button class="secondary" id="analyzeBtn">Analyze runs</button>
+        <span id="diagMsg" style="color:var(--accent-green);font-size:12px"></span>
+      </div>
+      <div id="diagOut" style="font-size:12px"></div>
+    </div>
+
+    <div class="card" style="margin-top:22px">
+      <h2 style="font-size:15px;color:var(--accent-green);margin:0 0 6px">Shortcuts (/ commands)</h2>
+      <p style="font-size:12px;color:var(--text-secondary);margin:0 0 10px">
+        Type <b>/</b> in the side panel to run these. Each shortcut is a reusable prompt with an optional start page and model.
+      </p>
+      <input id="scFilter" placeholder="🔍 Search shortcuts by name or prompt…" style="margin-bottom:8px" />
+      <div class="actions" style="margin:0 0 10px">
+        <button class="secondary" id="scExport" title="Download all shortcuts as a JSON backup file">Export JSON</button>
+        <button class="secondary" id="scImport" title="Restore/merge shortcuts from a JSON backup file">Import JSON</button>
+        <input type="file" id="scImportFile" accept=".json,application/json" style="display:none" />
+        <span id="scIoMsg" style="color:var(--accent-green);font-size:12px"></span>
+      </div>
+      <div id="shortcutList" style="font-size:12px"></div>
+
+      <div style="border-top:1px solid var(--border-color);margin-top:12px;padding-top:12px">
+        <input type="hidden" id="scId" />
+        <label>Name (becomes /name)</label>
+        <input id="scName" placeholder="servicenowjob" />
+        <label>Prompt</label>
+        <textarea id="scPrompt" rows="4" style="width:100%;background:var(--bg-tertiary);color:var(--text-primary);border:1px solid var(--border-color);border-radius:6px;padding:9px;font-family:inherit;font-size:13px;resize:vertical"></textarea>
+        <div class="row">
+          <div><label>Start from (URL, optional)</label><input id="scStartFrom" placeholder="http://localhost:3000/master-mind.html" /></div>
+          <div><label>Model (optional)</label><input id="scModel" placeholder="(leave blank = default agent model)" /></div>
+          <div><label>Category (optional)</label><input id="scCategory" list="scCatList" placeholder="General" /><datalist id="scCatList"></datalist></div>
+        </div>
+        <div class="row" style="align-items:flex-end">
+          <div>
+            <label>Schedule</label>
+            <select id="scRecur">
+              <option value="off">Off (manual only)</option>
+              <option value="interval">Every…</option>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="once">Once</option>
+            </select>
+          </div>
+          <div id="scIntervalWrap" style="display:none"><label>Interval</label><select id="scInterval"></select></div>
+          <div id="scDaysWrap" style="display:none"><label>Days</label>
+            <select id="scDays">
+              <option value="all">Every day</option>
+              <option value="weekdays">Weekdays (Mon–Fri)</option>
+              <option value="market">Market days (Mon–Fri, no NYSE holidays)</option>
+            </select>
+          </div>
+          <div id="scWindowWrap" style="display:none"><label>Active hours <span style="color:var(--text-muted)">(optional)</span></label>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input type="time" id="scWindowStart" aria-label="Start time" />
+              <span style="color:var(--text-secondary)">to</span>
+              <input type="time" id="scWindowEnd" aria-label="End time" />
+            </div>
+          </div>
+          <div id="scWeekdayWrap" style="display:none"><label>Day</label>
+            <select id="scWeekday">
+              <option value="0">Sunday</option><option value="1">Monday</option><option value="2">Tuesday</option>
+              <option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option>
+            </select>
+          </div>
+          <div id="scDateWrap" style="display:none"><label>Date</label><input type="date" id="scDate" /></div>
+          <div id="scTimeWrap" style="display:none"><label>Time</label><input type="time" id="scTime" value="09:00" /></div>
+        </div>
+        <div id="scSchedHint" style="font-size:11px;color:var(--text-secondary);margin-top:4px"></div>
+        <div class="actions" style="margin-top:12px">
+          <button id="scSave">Save shortcut</button>
+          <button class="secondary" id="scCancel">Clear form</button>
+          <span id="scMsg" style="color:var(--accent-green);font-size:12px"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:22px">
+      <h2 style="font-size:15px;color:var(--accent-green);margin:0 0 6px">Saved workflows (Teach)</h2>
+      <p style="font-size:12px;color:var(--text-secondary);margin:0 0 10px">
+        Workflows you recorded with the 🎬 button. Run them from the side panel
+        (+ → Run a saved workflow). Manage and delete them here.
+      </p>
+      <div id="workflowList" style="font-size:12px"></div>
+      <div class="actions" style="margin-top:12px">
+        <button class="secondary" id="clearWorkflowsBtn">Clear all workflows</button>
+        <span id="wfMsg" style="color:var(--accent-green);font-size:12px"></span>
+      </div>
+    </div>
+  </div>
+
+  <script src="options.js" type="module"></script>
+</body>
+</html>

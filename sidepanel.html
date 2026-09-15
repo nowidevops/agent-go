@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Agent Go</title>
+  <style>
+    :root {
+      --bg-primary: #1E1E1E;
+      --bg-secondary: #252526;
+      --bg-tertiary: #2D2D2D;
+      --bg-hover: #3C3C3C;
+      --text-primary: #D4D4D4;
+      --text-secondary: #808080;
+      --text-muted: #6A6A6A;
+      --text-on-accent: #fff;
+      --error-bg: #3a2020;
+      --error-text: #f0b3b3;
+      --accent-blue: #569CD6;
+      --accent-green: #4EC9B0;
+      --accent-orange: #CE9178;
+      --accent-purple: #C586C0;
+      --accent-red: #F44747;
+      --border-color: #404040;
+    }
+    * { box-sizing: border-box; }
+    body {
+      /* Extension-parity theme (local-claude-extension sidepanel): mono UI, 13px/1.5. */
+      margin: 0; font-family: "JetBrains Mono", Consolas, monospace;
+      background: var(--bg-primary); color: var(--text-primary);
+      display: flex; flex-direction: column; height: 100vh; font-size: 13px;
+    }
+    header {
+      padding: 9px 12px; background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border-color);
+      display: flex; align-items: center; gap: 8px;
+    }
+    header .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--text-secondary); flex: none; }
+    header .dot.ok { background: var(--accent-green); }
+    header .dot.bad { background: var(--accent-red); }
+    header h1 { font-size: 14px; margin: 0; font-weight: 600; }
+    header .provider-badge { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 10px; border: 1px solid var(--border-color); white-space: nowrap; cursor: default; flex: none; }
+    header .provider-badge.local { color: var(--accent-green); border-color: var(--accent-green); }
+    header .provider-badge.cloud,
+    header .provider-badge.warn { color: var(--accent-orange); border-color: var(--accent-orange); }
+    header .spacer { flex: 1; }
+    /* Heartbeat: a pulsing dot + live elapsed counter shown while the agent works. */
+    .working { display: none; align-items: center; gap: 6px; margin-left: 8px; font-size: 11px; color: var(--accent-green); white-space: nowrap; }
+    .working.on { display: inline-flex; }
+    .working .hb { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-green); animation: heartbeat 1s ease-in-out infinite; }
+    @keyframes heartbeat { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.65); opacity: 0.45; } }
+    @media (prefers-reduced-motion: reduce) {
+      .working .hb, .caret::after, button.teach.recording,
+      .teach-live .rec-dot, .listen-strip .rec-dot { animation: none; }
+      .switch .slider, .switch .slider::before { transition: none; }
+    }
+    /* Processing spinner shown to non-admin users in place of tool-call bubbles. */
+    .msg.proc { color: var(--text-secondary); font-style: italic; }
+    .proc-spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--border-color); border-top-color: var(--accent-green); border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: -2px; margin-right: 7px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { .proc-spinner { animation: none; } }
+    /* PINNED activity bar (above the composer): always-visible "still running" indicator so a
+       long multi-agent run never looks hung. Hidden when idle. */
+    .proc-bar { display: flex; align-items: center; gap: 4px; padding: 8px 16px; background: var(--bg-secondary); border-top: 1px solid var(--border-color); font-size: 13px; font-style: italic; color: var(--text-secondary); }
+    .proc-bar[hidden] { display: none; }
+    /* Proactive maintenance banner (top) + disabled composer while Agent Go is killed. */
+    .maint-banner { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: rgba(206,145,120,0.14); border-bottom: 1px solid var(--accent-orange); color: var(--accent-orange); font-size: 13px; font-weight: 600; }
+    .maint-banner[hidden] { display: none; }
+    .maint-banner .maint-ico { font-size: 15px; }
+    .update-banner { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: rgba(78,201,176,0.12); border-bottom: 1px solid var(--accent-green); color: var(--text-primary); font-size: 12px; }
+    .update-banner[hidden] { display: none; }
+    .update-banner .grow { flex: 1; min-width: 0; }
+    .update-banner button { background: transparent; border: 1px solid var(--accent-green); color: var(--accent-green); border-radius: 4px; padding: 2px 8px; font: inherit; cursor: pointer; }
+    .update-banner button:hover, .update-banner button:focus-visible { background: rgba(78,201,176,0.18); }
+    .input-row.maint-disabled { opacity: 0.5; pointer-events: none; }
+    .proc-bar .proc-status { font-style: italic; }
+    .proc-bar .proc-elapsed { margin-left: 2px; font-variant-numeric: tabular-nums; }
+    header .iconbtn {
+      background: transparent; border: 1px solid var(--border-color); color: var(--text-secondary);
+      border-radius: 6px; padding: 4px 8px; cursor: pointer; font-family: inherit; font-size: 12px;
+    }
+    header .iconbtn:hover { background: var(--bg-hover); color: var(--text-primary); }
+    .hdr-wrap { position: relative; display: flex; }
+    /* Higher specificity than .attach-menu (defined later) so these win and the
+       menu opens downward from the header instead of inheriting bottom:100%. */
+    header .hdr-menu { top: 100%; bottom: auto; left: auto; right: 0; margin-top: 6px; margin-bottom: 0; }
+    #status { font-size: 11px; color: var(--text-secondary); padding: 4px 12px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-color); }
+    #log { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+    /* Extension-parity message bubbles (local-claude-extension .msg): 13px mono, 1.5
+       line-height, left accent border — blue for user, green for assistant. */
+    .msg { padding: 8px 11px; border-radius: 6px; white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
+    .msg.user { background: var(--bg-tertiary); border-left: 3px solid var(--accent-blue); }
+    .msg.assistant { background: var(--bg-secondary); border-left: 3px solid var(--accent-green); }
+    .msg.error { background: var(--error-bg); border-left: 3px solid var(--accent-red); color: var(--error-text); }
+    .msg.note { background: transparent; color: var(--text-secondary); font-style: italic; padding: 2px 4px; }
+    /* sign-in guide (2026-09-04) — numbered steps + buttons inside the error bubble */
+    .msg.signin { white-space: normal; }
+    .msg.signin .signin-title { font-weight: 600; margin-bottom: 6px; }
+    .msg.signin .signin-steps { margin: 0 0 8px 0; padding-left: 22px; display: grid; gap: 4px; }
+    .msg.signin .signin-steps li { line-height: 1.45; }
+    .msg.signin .signin-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 6px; }
+    .msg.signin .signin-actions button { font: inherit; font-size: 12px; padding: 5px 12px; border-radius: 6px; border: 1px solid var(--accent-red); background: var(--accent-red); color: #1e1e1e; cursor: pointer; }
+    .msg.signin .signin-actions button.secondary { background: transparent; color: var(--error-text); }
+    .msg.signin .signin-actions button:hover { filter: brightness(1.1); }
+    .msg.signin .signin-actions button:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
+    .msg.signin .signin-hint { font-size: 12px; color: var(--text-secondary); }
+    .msg.assistant p { margin: 0 0 8px; }
+    .msg.assistant p:last-child { margin-bottom: 0; }
+    .msg.assistant code { background: var(--bg-tertiary); padding: 1px 5px; border-radius: 4px; color: var(--accent-orange); }
+    .msg.assistant pre { background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px; overflow-x: auto; }
+    .msg.assistant pre code { background: none; padding: 0; color: var(--text-primary); }
+    /* Code CARD: a header bar (language + Copy) over a DARK code area that fits the
+       panel theme; the VS "Dark+" syntax colors (set inline on tokens) read on it.
+       Scoped under .msg.assistant to outrank the base .msg.assistant pre above. */
+    .msg.assistant .code-card { margin: 8px 0; border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden; background: var(--bg-primary); }
+    .msg.assistant .code-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: var(--bg-tertiary); border-bottom: 1px solid var(--border-color); padding: 5px 10px; }
+    .msg.assistant .code-lang { font-size: 11px; font-weight: 600; color: var(--text-secondary); letter-spacing: .3px; }
+    .msg.assistant .code-copy { font-size: 11px; color: var(--text-secondary); background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 5px; padding: 2px 9px; cursor: pointer; font-family: inherit; }
+    .msg.assistant .code-copy:hover { background: var(--bg-hover); color: var(--text-primary); }
+    .msg.assistant .code-card pre { margin: 0; background: var(--bg-primary); border: none; border-radius: 0; padding: 10px 12px; overflow-x: auto; }
+    .msg.assistant .code-card pre code { color: var(--text-primary); }
+    /* Copy button on rendered tables — global (not scoped to .msg.assistant) so it
+       also styles tables inside the admin phase-report viewer. Mirrors .code-copy. */
+    .md-table-wrap .table-copy { font-size: 11px; color: var(--text-secondary); background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 5px; padding: 2px 9px; cursor: pointer; font-family: inherit; }
+    .md-table-wrap .table-copy:hover { background: var(--bg-hover); color: var(--text-primary); }
+    .msg.assistant a { color: var(--accent-blue); }
+    .msg.assistant ul, .msg.assistant ol { margin: 4px 0 8px; padding-left: 20px; }
+    /* Parity headings: SAME size as body (13px), purple accent. */
+    .msg.assistant h1, .msg.assistant h2, .msg.assistant h3 { font-size: 13px; margin: 6px 0 4px; color: var(--accent-purple); }
+    .caret::after { content: "▋"; color: var(--accent-green); animation: blink 1s step-start infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
+    .tool { font-size: 11px; color: var(--text-secondary); background: var(--bg-secondary); border: 1px dashed var(--border-color); border-radius: 6px; padding: 6px 9px; }
+    .tool .name { color: var(--accent-orange); }
+    .tool.ok .name { color: var(--accent-green); }
+    .tool.fail .name { color: var(--accent-red); }
+    .tool pre { margin: 4px 0 0; white-space: pre-wrap; color: var(--text-secondary); max-height: 130px; overflow: auto; }
+    footer { padding: 10px 12px 14px; border-top: 1px solid var(--border-color); background: var(--bg-secondary); }
+    /* Bottom-align so the buttons keep their normal size when the textarea
+       grows (e.g. during live dictation) instead of stretching with it. */
+    /* Unified composer PILL (Agent Go parity, 2026-07-19): ONE rounded container
+       holds the attach/tool buttons, a borderless auto-height textarea, and a
+       circular send end-cap. Styling only — every id/handler is unchanged.
+       Revert copy: <local path> */
+    .input-row { display: flex; gap: 2px; align-items: flex-end; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 24px; padding: 5px 6px; }
+    .input-row:focus-within { border-color: var(--accent-blue); box-shadow: 0 0 0 1px var(--accent-blue); }
+    .input-row > button, .input-row > .attach-wrap > button { height: 36px; flex: none; }
+    .input-wrap { position: relative; flex: 1; display: flex; }
+    textarea {
+      flex: 1; resize: none; background: transparent; color: var(--text-primary);
+      border: none; border-radius: 0; padding: 8px 18px 8px 6px; font-family: inherit;
+      font-size: 15px; line-height: 1.5; min-height: 36px; max-height: 70vh; overflow-y: hidden;
+    }
+    textarea:focus { outline: none; }
+    .clear-input {
+      position: absolute; top: 7px; right: 4px; display: none;
+      background: var(--bg-hover); color: var(--text-secondary); border: none; border-radius: 50%;
+      width: 18px; height: 18px; line-height: 18px; padding: 0; cursor: pointer;
+      font-family: inherit; font-size: 11px; text-align: center;
+    }
+    .clear-input:hover { background: var(--accent-red); color: var(--text-on-accent); }
+    .clear-input.show { display: block; }
+    /* Circular send (↑) / stop (■) end-cap inside the pill. */
+    button.send { background: var(--accent-blue); color: var(--text-on-accent); border: none; border-radius: 50%; width: 36px; min-width: 36px; padding: 0; cursor: pointer; font-family: inherit; font-size: 17px; font-weight: 700; line-height: 1; display: flex; align-items: center; justify-content: center; }
+    button.send.stop { background: var(--accent-red); font-size: 13px; }
+    button.send:disabled { opacity: 0.5; cursor: not-allowed; }
+    @keyframes pulse { 50% { opacity: 0.55; } }
+    button.teach {
+      background: transparent; color: var(--text-secondary); border: none;
+      border-radius: 50%; width: 36px; min-width: 36px; padding: 0; cursor: pointer; font-family: inherit; font-size: 17px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    button.teach:hover { background: var(--bg-hover); color: var(--text-primary); }
+    button.teach.recording {
+      background: var(--accent-red); color: var(--text-on-accent); border-color: var(--accent-red);
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+    /* Live step list shown while recording a workflow */
+    .teach-live .rec-dot {
+      display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+      background: var(--accent-red); margin-right: 6px; vertical-align: middle;
+      animation: recblink 1s steps(2, start) infinite;
+    }
+    @keyframes recblink { 50% { opacity: 0.15; } }
+    .teach-live-list { margin: 6px 0 0; padding-left: 22px; }
+    .teach-live-list li { font-size: 12px; color: var(--text-primary); margin: 3px 0; word-break: break-word; }
+    .wf-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+    .wf-row .name { flex: 1; }
+    .wf-row .run { background: var(--accent-green); color: var(--bg-primary); border: none; border-radius: 5px; padding: 4px 12px; cursor: pointer; font-family: inherit; font-size: 12px; font-weight: 600; }
+    .wf-row .del { cursor: pointer; color: var(--text-secondary); font-size: 13px; }
+    .wf-row .del:hover { color: var(--accent-red); }
+    .slash-menu {
+      display: none; background: var(--bg-secondary); border: 1px solid var(--border-color);
+      border-radius: 8px; margin-bottom: 8px; overflow-y: auto; max-height: 240px;
+      box-shadow: 0 -4px 14px rgba(0,0,0,0.35);
+    }
+    .slash-menu.open { display: block; }
+    .slash-item { display: flex; align-items: baseline; gap: 10px; padding: 8px 12px; cursor: pointer; }
+    .slash-item.sel, .slash-item:hover { background: var(--bg-hover); }
+    .slash-item .cmd { color: var(--accent-blue); }
+    .slash-item .sc-name { color: var(--accent-green); }
+    .slash-item .desc { color: var(--text-secondary); font-size: 11px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    button.attach {
+      background: transparent; color: var(--text-secondary); border: none;
+      border-radius: 50%; width: 36px; min-width: 36px; padding: 0; cursor: pointer; font-family: inherit; font-size: 22px; font-weight: 400;
+      display: flex; align-items: center; justify-content: center;
+    }
+    button.attach:hover { background: var(--bg-hover); color: var(--text-primary); }
+    .attach-menu {
+      position: absolute; bottom: 100%; left: 0; margin-bottom: 6px;
+      background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.5); overflow: hidden; display: none; z-index: 10; min-width: 190px;
+    }
+    .attach-menu.open { display: block; }
+    .attach-menu button {
+      display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+      background: transparent; border: none; color: var(--text-primary);
+      padding: 10px 14px; cursor: pointer; font-family: inherit; font-size: 13px;
+    }
+    .attach-menu button:hover { background: var(--bg-hover); }
+    .attach-wrap { position: relative; display: flex; }
+    .chip-row { display: none; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+    .chip-row.show { display: flex; }
+    .chip {
+      display: flex; align-items: center; gap: 8px; background: var(--bg-tertiary);
+      border: 1px solid var(--border-color); border-radius: 6px; padding: 4px 8px; font-size: 11px;
+      color: var(--text-secondary); max-width: 100%;
+    }
+    .chip img { height: 34px; border-radius: 4px; border: 1px solid var(--border-color); }
+    .chip .x { cursor: pointer; color: var(--text-secondary); font-size: 14px; padding: 0 2px; }
+    .chip .x:hover { color: var(--accent-red); }
+    .msg.user img.sent-img { display: block; max-width: 160px; border-radius: 6px; margin-top: 6px; border: 1px solid var(--border-color); }
+    .mode-row { display: flex; align-items: center; margin-top: 6px; }
+    /* Active-model indicator, pinned to the bottom-RIGHT of the composer row. */
+    .active-model { margin-left: auto; font-size: 11px; color: var(--text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 58%; padding-left: 8px; }
+    .active-model.running { color: var(--accent-green); }
+    .active-model .am-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent-green); margin-right: 5px; vertical-align: 1px; }
+    .modebtn {
+      background: transparent; color: var(--text-secondary); border: 1px solid var(--border-color);
+      border-radius: 12px; padding: 3px 10px; cursor: pointer; font-family: inherit; font-size: 11px;
+    }
+    .modebtn:hover { background: var(--bg-hover); color: var(--text-primary); }
+    /* Menu-item descriptions are COLLAPSED by default — reveal on hover/focus so the
+       + menu and mode menu stay compact (just labels) until you point at an item. */
+    .attach-menu .desc { display: none; color: var(--text-secondary); font-size: 11px; margin-top: 2px; white-space: normal; }
+    .attach-menu button:hover .desc, .attach-menu button:focus .desc { display: block; }
+    .attach-menu button .check { color: var(--accent-blue); margin-left: 6px; }
+    .tool.approval { border: 1px solid var(--accent-orange); }
+    .tool.approval .name { color: var(--accent-orange); }
+    .approval-actions { display: flex; gap: 8px; margin-top: 7px; }
+    .approval-actions button {
+      border: none; border-radius: 5px; padding: 5px 14px; cursor: pointer;
+      font-family: inherit; font-size: 12px; font-weight: 600;
+    }
+    .approval-actions .allow { background: var(--accent-green); color: var(--bg-primary); }
+    .approval-actions .deny { background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border-color); }
+    .approval-actions .deny:hover { background: var(--accent-red); color: var(--text-on-accent); }
+    .approval-actions button:disabled { opacity: 0.45; cursor: not-allowed; }
+    .approval-done { color: var(--text-secondary); font-size: 11px; margin-top: 6px; }
+    .fb-row { display: flex; align-items: center; gap: 4px; margin: -4px 0 2px 4px; }
+    .fb-row button {
+      background: transparent; border: 1px solid transparent; border-radius: 5px;
+      font-size: 13px; padding: 1px 5px; cursor: pointer; opacity: 0.55;
+    }
+    .fb-row button:hover { opacity: 1; background: var(--bg-hover); }
+    .fb-row button.chosen { opacity: 1; border-color: var(--accent-blue); background: var(--bg-tertiary); }
+    .fb-row button:disabled { cursor: default; }
+    .fb-note { color: var(--text-secondary); font-size: 10.5px; font-style: italic; margin-left: 4px; }
+    .act-row { flex-wrap: wrap; gap: 6px; }
+    .act-row .sep { flex: 1; min-width: 0; }
+    .act-row .exp {
+      background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-secondary);
+      border-radius: 5px; font-size: 11px; padding: 2px 8px; cursor: pointer; font-family: inherit; opacity: 1;
+    }
+    .act-row .exp:hover { background: var(--bg-hover); color: var(--text-primary); }
+    .exp-wrap { position: relative; display: inline-flex; }
+    /* Per-response export menu: reuse .attach-menu (opens upward) but right-align
+       it under the Export button. Defined after .attach-menu so these win. */
+    .exp-menu { left: auto; right: 0; min-width: 168px; }
+    .hint { color: var(--text-secondary); font-size: 11px; margin-top: 6px; }
+    /* ---------- meeting listener strip ---------- */
+    .listen-strip {
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      background: var(--bg-tertiary); border: 1px solid var(--accent-red); border-radius: 6px;
+      padding: 6px 9px; margin-bottom: 8px; font-size: 11px;
+    }
+    .listen-strip[hidden] { display: none; }
+    .listen-strip .rec-dot {
+      display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+      background: var(--accent-red); animation: recblink 1s steps(2, start) infinite;
+    }
+    .listen-strip label { display: inline-flex; align-items: center; gap: 4px; color: var(--text-secondary); cursor: pointer; white-space: nowrap; }
+    .listen-strip input[type=checkbox] { accent-color: var(--accent-blue); margin: 0; }
+    .listen-strip input[type=text], .listen-strip input:not([type]) {
+      flex: 1; min-width: 110px; background: var(--bg-primary); color: var(--text-primary);
+      border: 1px solid var(--border-color); border-radius: 5px; padding: 3px 7px; font-family: inherit; font-size: 11px;
+    }
+    .listen-strip select {
+      background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-color);
+      border-radius: 5px; padding: 3px 5px; font-family: inherit; font-size: 11px; cursor: pointer;
+    }
+    .listen-strip button {
+      background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-color);
+      border-radius: 5px; padding: 3px 10px; cursor: pointer; font-family: inherit; font-size: 11px;
+    }
+    .listen-strip button:hover { background: var(--accent-red); color: var(--text-on-accent); }
+
+    /* ---------- Schedule / Create-shortcut modal ---------- */
+    .modal-overlay {
+      display: none; position: fixed; inset: 0; z-index: 50;
+      background: rgba(0, 0, 0, 0.55); align-items: center; justify-content: center; padding: 16px;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 10px;
+      width: 100%; max-width: 460px; max-height: 92vh; display: flex; flex-direction: column;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+    }
+    /* Prompt Builder modal: auto-grow with the panel instead of the 460px cap —
+       generated prompts need the reading room. Output box is tall + resizable. */
+    #pbOverlay .modal { width: 96vw; max-width: min(96vw, 900px); }
+    #pbOverlay .modal-body { overflow-y: auto; }
+    #pbOverlay #pbOut { min-height: 240px; max-height: 55vh; overflow-y: auto; resize: vertical; }
+    #pbOverlay .pb-chip {
+      background: transparent; border: 1px solid var(--border-color); color: var(--text-secondary);
+      border-radius: 10px; padding: 3px 9px; font-size: 11px; cursor: pointer;
+    }
+    #pbOverlay .pb-chip:hover { background: var(--bg-hover); color: var(--text-primary); }
+    #pbOverlay .pb-chip.active { border-color: var(--accent-blue); color: var(--accent-blue); }
+    /* Clean-look badge (outlined pill, never a filled tint) naming the AI model
+       that generated the current prompt. */
+    .pb-model { border: 1px solid var(--accent-blue); color: var(--accent-blue); border-radius: 10px; padding: 1px 8px; font-size: 10px; white-space: nowrap; }
+    .modal-head { display: flex; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--border-color); }
+    .modal-head h3 { margin: 0; font-size: 14px; flex: 1; }
+    .modal-x { background: transparent; border: none; color: var(--text-secondary); cursor: pointer; font-size: 15px; padding: 2px 6px; border-radius: 6px; }
+    .modal-x:hover { background: var(--bg-hover); color: var(--text-primary); }
+    .modal-body { padding: 14px; overflow-y: auto; }
+    .modal-body label { display: block; font-size: 12px; color: var(--text-secondary); margin: 12px 0 5px; }
+    .modal-body label:first-child { margin-top: 0; }
+    .modal-body .req { color: var(--accent-red); }
+    .modal-body input[type=text], .modal-body input[type=url], .modal-body input[type=date],
+    .modal-body input[type=time], .modal-body textarea, .modal-body select {
+      width: 100%; background: var(--bg-tertiary); color: var(--text-primary);
+      border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 10px;
+      font-family: inherit; font-size: 13px;
+    }
+    .modal-body textarea { resize: vertical; }
+    .modal-body input:focus, .modal-body textarea:focus, .modal-body select:focus { outline: none; border-color: var(--accent-blue); }
+    .prefixed { display: flex; align-items: center; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; }
+    .prefixed .pfx { padding: 0 4px 0 10px; color: var(--text-secondary); }
+    .prefixed input { border: none !important; background: transparent !important; }
+    .row-between { display: flex; align-items: center; justify-content: space-between; margin-top: 14px; }
+    /* toggle switch */
+    .switch { position: relative; display: inline-block; width: 38px; height: 20px; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .switch .slider { position: absolute; inset: 0; cursor: pointer; background: var(--bg-hover); border-radius: 20px; transition: 0.2s; }
+    .switch .slider::before { content: ""; position: absolute; height: 14px; width: 14px; left: 3px; bottom: 3px; background: var(--text-secondary); border-radius: 50%; transition: 0.2s; }
+    .switch input:checked + .slider { background: var(--accent-blue); }
+    .switch input:checked + .slider::before { transform: translateX(18px); background: var(--text-on-accent); }
+    .sched-fields { margin-top: 10px; padding: 10px; background: var(--bg-tertiary); border-radius: 6px; }
+    .sched-fields > select { margin-bottom: 8px; }
+    .sched-when { display: flex; gap: 8px; }
+    .sched-when > * { flex: 1; }
+    .sched-note { color: var(--accent-green); font-size: 11px; margin-top: 8px; min-height: 14px; }
+    .sched-warn { color: var(--accent-orange); font-size: 11px; margin-top: 6px; }
+    .modal-foot { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--border-color); }
+    .modal-msg { flex: 1; font-size: 11px; color: var(--accent-green); }
+    .btn-secondary, .btn-primary { border-radius: 6px; padding: 7px 14px; cursor: pointer; font-family: inherit; font-size: 12px; border: 1px solid var(--border-color); }
+    .btn-secondary { background: var(--bg-tertiary); color: var(--text-primary); }
+    .btn-secondary:hover { background: var(--bg-hover); }
+    .btn-primary { background: var(--accent-blue); color: var(--text-on-accent); border-color: var(--accent-blue); }
+    .btn-primary:hover { filter: brightness(1.08); }
+    /* scheduled-run pending banner */
+    .sched-banner { background: var(--bg-tertiary); border-left: 3px solid var(--accent-purple); padding: 7px 10px; margin: 6px 0; border-radius: 4px; font-size: 12px; color: var(--text-secondary); }
+  </style>
+</head>
+<body>
+  <header>
+    <span class="dot" id="statusDot" title="Agent Go status"></span>
+    <h1>Agent Go</h1>
+    <span class="provider-badge cloud" id="providerBadge" title="Agent Go cloud — inference runs on the Agent Go service">☁ Agent Go</span>
+    <span class="working" id="working" title="The agent is working"><span class="hb"></span>working <span id="workSecs"></span></span>
+    <span class="spacer"></span>
+    <button class="iconbtn" id="zoomOut" title="Zoom out (Ctrl −)">A−</button>
+    <button class="iconbtn" id="zoomIn" title="Zoom in (Ctrl +)">A+</button>
+    <div class="hdr-wrap">
+      <button class="iconbtn" id="exportBtn" title="Export the whole conversation" aria-haspopup="menu" aria-expanded="false">⬇ Export</button>
+      <div class="attach-menu hdr-menu" id="exportMenu">
+        <button id="expCopy">📋 Copy all</button>
+        <button id="expMd">⬇ Download .md</button>
+        <button id="expDocx">⬇ Download .docx</button>
+        <button id="expPdf">⬇ Download .pdf</button>
+      </div>
+    </div>
+    <button class="iconbtn" id="clearBtn" title="Clear conversation">Clear</button>
+    <button class="iconbtn" id="settingsBtn" title="Settings">⚙ Settings</button>
+  </header>
+
+  <!-- Proactive maintenance banner: shown (and the composer disabled) when the backend's public
+       /status reports the master kill is engaged. Populated by checkAgentGoStatus(). -->
+  <div id="maintBanner" class="maint-banner" hidden role="status" aria-live="polite">
+    <span class="maint-ico">🛠</span>
+    <span>Agent&nbsp;Go is temporarily under maintenance — we'll be back shortly.</span>
+  </div>
+
+  <!-- "A newer pack is available" (2026-09-03): stored daily check, see update-check.js. -->
+  <div id="updateBanner" class="update-banner" hidden role="status" aria-live="polite">
+    <span>⬆</span>
+    <span class="grow" id="updateBannerText"></span>
+    <button id="updateBannerGo" type="button" title="Open the Agent Go download page">Download</button>
+    <button id="updateBannerDismiss" type="button" title="Hide for this version">✕</button>
+  </div>
+
+  <div id="status">Connecting to Agent Go…</div>
+
+  <div id="log"></div>
+
+  <!-- Pinned activity bar: sits BETWEEN the scrolling log and the composer, so a running
+       task (esp. long multi-agent runs) is ALWAYS visible without scrolling. Populated by
+       showSpinner()/hideSpinner(); hidden when idle. -->
+  <div id="procBar" class="proc-bar" hidden>
+    <span class="proc-spinner"></span>
+    <span class="proc-status"></span>
+    <span class="proc-elapsed" style="opacity:.6"></span>
+  </div>
+
+  <footer>
+    <div class="slash-menu" id="slashMenu"></div>
+    <div class="listen-strip" id="listenStrip" hidden>
+      <span class="rec-dot"></span>
+      <b id="listenLabel">Listening…</b>
+      <label title="When your trigger phrase is heard (or a question is asked, if no trigger is set), the agent composes and delivers a contribution"><input type="checkbox" id="lsParticipate" /> participate</label>
+      <label title="Speak the agent's replies out loud through your speakers"><input type="checkbox" id="lsSpeak" /> speak</label>
+      <select id="lsRate" title="Voice speed for spoken replies">
+        <option value="0.5">0.5x</option>
+        <option value="0.75">0.75x</option>
+        <option value="1" selected>1x</option>
+        <option value="1.25">1.25x</option>
+        <option value="1.5">1.5x</option>
+        <option value="1.75">1.75x</option>
+        <option value="2">2x</option>
+      </select>
+      <input id="lsTrigger" placeholder="trigger phrase, e.g. hey assistant" title="Participation trigger — leave empty to respond to direct questions" />
+      <button id="lsStop" title="Stop listening">■ Stop</button>
+    </div>
+    <div class="chip-row" id="chipRow"></div>
+    <div class="input-row">
+      <div class="attach-wrap">
+        <button class="attach" id="attach" title="Attach — screenshot or image" aria-haspopup="menu" aria-expanded="false">+</button>
+        <div class="attach-menu" id="attachMenu">
+          <button id="menuShot">📷 Take a screenshot</button>
+          <button id="menuImage" title="Or just paste (Ctrl+V) — a Snipping Tool capture attaches automatically">🖼 Add an image (or paste)</button>
+          <button id="menuWorkflows">▶ Run a saved workflow</button>
+          <button id="menuSchedule">📅 Schedule a task<span class="desc">Save a prompt as a shortcut and run it on a schedule (once, daily, or weekly).</span></button>
+          <button id="menuLocalFiles">📁 Local files (MCP)<span class="desc">Connect a local folder so the agent can explore &amp; read it — incl. PDFs, Word/Excel/PowerPoint (text extracted) and images (vision-described) — organize it (create_folder / move_file / copy_file), and write with approval — like master-mind's Filesystem MCP.</span></button>
+          <button id="menuServiceNow">🔌 ServiceNow (MCP)<span class="desc">Connect one or more ServiceNow instances (URL + user + password, or paste CSV) so the agent can query real records, tables &amp; schema (sn_query_*).</span></button>
+          <button id="menuPromptBuilder">✍️ Prompt Builder<span class="desc">Describe a rough goal — get a well-written prompt tuned to this agent's actual tools (exact URLs, step budgets, verify criteria, sub-agent fan-out).</span></button>
+          <button id="menuConvLog">💾 Conversation log<span class="desc">Pick a folder (e.g. <local path> LLM TRAINING\conversations) — every run auto-saves the full conversation there as .md + .jsonl, including 👍/👎 feedback, to keep reinforcing the learning.</span></button>
+        </div>
+      </div>
+      <button class="teach" id="teach" title="Teach a workflow — record your actions &amp; narration; the agent learns to repeat it">🎬</button>
+      <button class="teach" id="mic" title="Voice input — dictate into the prompt (local Whisper)">🎤</button>
+      <div class="attach-wrap">
+        <button class="teach" id="listenBtn" title="Listen to a meeting or conversation — live transcript + active participation" aria-haspopup="menu" aria-expanded="false">🎧</button>
+        <div class="attach-menu" id="listenMenu">
+          <button id="listenTab">🖥 Meeting audio<span class="desc">Capture the meeting's audio (Teams / Meet / Zoom — web tab or native app via "share system audio") and transcribe it live — 100% local (Whisper).</span></button>
+          <button id="listenMic">🎤 Microphone<span class="desc">Listen to the room / an in-person conversation through your mic.</span></button>
+          <button id="listenBoth">🖥+🎤 Both<span class="desc">Tab audio + mic together — transcript labels who said what by source.</span></button>
+        </div>
+      </div>
+      <div class="input-wrap">
+        <textarea id="input" placeholder="e.g. Summarize this page  ·  Screenshot it and read the chart  ·  Find the login button and click it" rows="2"></textarea>
+        <button class="clear-input" id="clearInput" title="Clear prompt (Esc)">✕</button>
+      </div>
+      <button class="send" id="send" aria-label="Send" title="Send">↑</button>
+    </div>
+    <input type="file" id="filePick" accept="image/*" multiple style="display:none" />
+    <div class="mode-row">
+      <div class="attach-wrap">
+        <button class="modebtn" id="modeBtn" aria-haspopup="menu" aria-expanded="false">📋 Plan first ▾</button>
+        <div class="attach-menu" id="modeMenu">
+          <button id="modePlan">📋 Plan first<span class="check" id="checkPlan">✓</span>
+            <span class="desc">Drafts a step-by-step plan and waits for your approval before doing anything.</span>
+          </button>
+          <button id="modeAsk">✋ Ask before acting<span class="check" id="checkAsk" style="display:none">✓</span>
+            <span class="desc">Pauses for your approval before each action — clicking, typing, navigating, or making changes.</span>
+          </button>
+          <button id="modeAuto">▶▶ Act without asking<span class="check" id="checkAuto" style="display:none">✓</span>
+            <span class="desc">Acts on its own without pausing for approval — the Stop button still halts it.</span>
+          </button>
+          <button id="modeReadonly">🔒 Read-only<span class="check" id="checkReadonly" style="display:none">✓</span>
+            <span class="desc">Review and analysis only — all editing is disabled, so it can't change any record, page, or file. Best for code review.</span>
+          </button>
+        </div>
+      </div>
+      <span id="activeModel" class="active-model" title="Active model — the model running your requests"></span>
+    </div>
+    <!-- Usage tips moved into ⚙ Settings → "Tips & keyboard shortcuts" to keep the composer clean. -->
+  </footer>
+
+  <!-- Prompt Builder modal -->
+  <div class="modal-overlay" id="pbOverlay">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="pbTitle">
+      <div class="modal-head">
+        <h3 id="pbTitle">✍️ Prompt Builder</h3>
+        <div style="display:flex;align-items:center;gap:4px">
+          <button class="modal-x" id="pbZoomOut" title="Smaller text (Ctrl+scroll down in the box)" aria-label="Zoom out" style="font-size:12px">A−</button>
+          <button class="modal-x" id="pbZoomIn" title="Larger text (Ctrl+scroll up in the box)" aria-label="Zoom in" style="font-size:15px">A+</button>
+          <button class="modal-x" id="pbDetach" title="Detach — open the Prompt Builder in its own window" aria-label="Open in window">⧉</button>
+          <button class="modal-x" id="pbClose" aria-label="Close">✕</button>
+        </div>
+      </div>
+      <div class="modal-body">
+        <label for="pbGoal">What do you want the agent to do? (rough is fine)</label>
+        <div id="pbChips" style="display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 6px">
+          <button class="pb-chip" data-preset="servicenow" data-tpl="In my ServiceNow instance <instance URL>, build a <artifact type, e.g. Business Rule> named <name> on table <table> that <exact behavior>. Verify it saved and is active.">⚙️ SN build</button>
+          <button class="pb-chip" data-preset="review" data-tpl="Do a code review of the <artifact> currently open in my ServiceNow instance for correctness, security, and best practices. Read-only — change nothing.">🔍 Code review</button>
+          <button class="pb-chip" data-preset="factfinding" data-tpl="Fact finding for ServiceNow user story <STORY NUMBER, or URL, or file path> in <instance URL>: (1) read the story, (2) find and list every artifact involved in its requirements, (3) re-write the story in a clear, implementation-ready format any AI model can implement. Read-only — change nothing.">🔎 Fact finding</button>
+          <button class="pb-chip" data-preset="postdeploy" data-tpl="Post-deployment validation in ServiceNow.&#10;Source Instance: <SOURCE INSTANCE URL> (NON-PRODUCTION — DEV)&#10;Target Instance: <TARGET INSTANCE URL> (NON-PRODUCTION — TEST | PRODUCTION)&#10;Parent Update Set: <PARENT UPDATE SET URL>&#10;Child Update Set: <CHILD UPDATE SET URL, or none>&#10;Story: <STORY NUMBER OR URL>&#10;Verify and validate the deployed update set content (scripts, configurations, and everything else in the payload), smoke-test the story's acceptance criteria if the target is NON-PRODUCTION, report every issue found, and give the click-by-click steps.">🚀 Post deployment</button>
+          <button class="pb-chip" data-preset="research" data-tpl="Do deep research on <topic> across several sources and give me a consolidated summary with a cited URL for every claim. Don't invent figures.">📚 Research</button>
+          <button class="pb-chip" data-preset="browser" data-tpl="On <URL>, <what to do>. Stop before <any irreversible step, e.g. submitting> and show me what you found/entered.">🌐 Browser task</button>
+        </div>
+        <div id="pbSnAreas" hidden style="margin:0 0 6px">
+          <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px">ServiceNow focus areas (multi-select — scopes the prompt + grounds the agent's API reference):</div>
+          <div style="display:flex;flex-wrap:wrap;gap:5px">
+            <button class="pb-chip pb-area">GlideAjax</button>
+            <button class="pb-chip pb-area">Business Rule</button>
+            <button class="pb-chip pb-area">Client Script</button>
+            <button class="pb-chip pb-area">Script Include</button>
+            <button class="pb-chip pb-area">UI Policy</button>
+            <button class="pb-chip pb-area">UI Action</button>
+            <button class="pb-chip pb-area">Catalog Item</button>
+            <button class="pb-chip pb-area">Record Producer</button>
+            <button class="pb-chip pb-area">Flow Designer</button>
+            <button class="pb-chip pb-area">ACL</button>
+            <button class="pb-chip pb-area">Scheduled Job</button>
+            <button class="pb-chip pb-area">Fix Script</button>
+            <button class="pb-chip pb-area">Transform Map</button>
+            <button class="pb-chip pb-area">Scripted REST API</button>
+            <button class="pb-chip pb-area">Service Portal Widget</button>
+            <button class="pb-chip pb-area">Notification</button>
+            <button class="pb-chip pb-area">ATF</button>
+            <button class="pb-chip pb-area">CMDB / IRE</button>
+          </div>
+        </div>
+        <textarea id="pbGoal" rows="3" placeholder="e.g. open the Projects folder on my dashboard  ·  compare pricing on these 3 vendor sites  ·  review this widget's server script"></textarea>
+        <select id="pbHistory" style="margin-top:6px;width:100%">
+          <option value="">🕘 Recent prompts…</option>
+        </select>
+        <label style="display:flex;align-items:center;gap:8px;margin-top:6px;font-weight:normal;cursor:pointer">
+          <input type="checkbox" id="pbUsePage" checked style="width:auto" /> Include my active tab's URL as context
+        </label>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+          <button class="btn-secondary" id="pbAttach" title="Attach images (vision-described) or text files (content quoted) as extra context — max 5">📎 Attach files</button>
+          <span class="note" style="font-size:11px">images vision-described · text quoted · max 5</span>
+          <span id="pbVision" class="pb-model" hidden></span>
+        </div>
+        <div id="pbFiles" style="display:flex;flex-wrap:wrap;gap:5px;margin-top:4px"></div>
+        <input type="file" id="pbFilePick" accept="image/*,.txt,.md,.js,.json,.csv,.xml,.html,.css,.log,.yml,.yaml" multiple style="display:none" />
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn-primary" id="pbGen">Generate prompt</button>
+          <button class="btn-secondary" id="pbRegen" title="Run the same goal again for another take" hidden>↻ Regenerate</button>
+          <button class="btn-secondary" id="pbClear" style="margin-left:auto" title="Clear the goal and the generated prompt — start over (history keeps past generations)">🗑 Clear</button>
+        </div>
+        <div id="pbStatus" class="note" role="status" aria-live="polite" style="margin-top:6px;font-size:12px"></div>
+        <div id="pbResultWrap" hidden>
+          <label for="pbOut" style="margin-top:10px;display:flex;align-items:baseline;gap:8px">Generated prompt (edit freely) <span id="pbModel" class="pb-model" title="The AI model that generated this prompt" hidden></span> <span id="pbCount" style="font-weight:normal;font-size:11px;color:var(--text-secondary);margin-left:auto"></span></label>
+          <textarea id="pbOut" rows="8"></textarea>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button class="btn-primary" id="pbUse">Insert into composer</button>
+            <button class="btn-secondary" id="pbCopy">📋 Copy</button>
+            <button class="btn-secondary" id="pbDownload" title="Save the prompt as a .md file into Downloads">⬇ Download</button>
+            <button class="btn-secondary" id="pbSaveFolder" title="Save the prompt as a .md file into your chosen folder (first click picks the folder)">💾 Save to folder</button>
+            <button class="btn-secondary" id="pbPickFolder" style="padding-left:8px;padding-right:8px" title="Choose / replace the save folder" aria-label="Choose save folder">📂</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Schedule task / Create shortcut modal -->
+  <div class="modal-overlay" id="schedOverlay">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="schedTitle">
+      <div class="modal-head">
+        <h3 id="schedTitle">Create shortcut</h3>
+        <button class="modal-x" id="schedClose" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <label for="schedName">Name</label>
+        <div class="prefixed"><span class="pfx">/</span><input id="schedName" type="text" placeholder="e.g. summarize" /></div>
+
+        <label for="schedPrompt">Prompt <span class="req">*</span></label>
+        <textarea id="schedPrompt" rows="4" placeholder="Enter your prompt text…"></textarea>
+
+        <label for="schedStart">Start from</label>
+        <input id="schedStart" type="url" placeholder="https://example.com" />
+
+        <div class="row-between">
+          <label for="schedToggle" style="margin:0">Schedule</label>
+          <label class="switch"><input type="checkbox" id="schedToggle" /><span class="slider"></span></label>
+        </div>
+        <div id="schedFields" class="sched-fields" hidden>
+          <select id="schedRecurrence">
+            <option value="once">Once</option>
+            <option value="interval">Every…</option>
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+          </select>
+          <div class="sched-when">
+            <input id="schedDate" type="date" />
+            <select id="schedWeekday" hidden>
+              <option value="0">Sunday</option><option value="1">Monday</option><option value="2">Tuesday</option>
+              <option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option>
+              <option value="6">Saturday</option>
+            </select>
+            <select id="schedInterval" hidden>
+              <option value="5">Every 5 min</option>
+              <option value="10">Every 10 min</option>
+              <option value="15">Every 15 min</option>
+              <option value="30">Every 30 min</option>
+              <option value="60" selected>Every 1 hour</option>
+              <option value="120">Every 2 hours</option>
+              <option value="180">Every 3 hours</option>
+              <option value="240">Every 4 hours</option>
+              <option value="360">Every 6 hours</option>
+              <option value="480">Every 8 hours</option>
+              <option value="720">Every 12 hours</option>
+              <option value="1440">Every 24 hours</option>
+            </select>
+            <input id="schedTime" type="time" value="09:00" />
+          </div>
+          <div id="schedDaysWrap" hidden>
+            <label for="schedDays" style="margin-top:10px">Days</label>
+            <select id="schedDays">
+              <option value="all">Every day</option>
+              <option value="weekdays">Weekdays (Mon–Fri)</option>
+              <option value="market">Market days (Mon–Fri, no NYSE holidays)</option>
+            </select>
+          </div>
+          <div id="schedWindow" hidden>
+            <label for="schedWindowStart" style="margin-top:10px">Active hours <span style="color:var(--text-muted);font-weight:normal">(optional — leave blank for all day)</span></label>
+            <div class="sched-when">
+              <input id="schedWindowStart" type="time" aria-label="Start time" />
+              <span style="flex:0 0 auto;align-self:center;color:var(--text-secondary)">to</span>
+              <input id="schedWindowEnd" type="time" aria-label="End time" />
+            </div>
+          </div>
+          <div class="sched-note" id="schedNextNote"></div>
+          <div class="sched-warn">⚠ Scheduled tasks only fire while Chrome is running, and run in this side panel.</div>
+        </div>
+
+        <label for="schedModel">Model</label>
+        <select id="schedModel"><option value="">Default (from Settings)</option></select>
+      </div>
+      <div class="modal-foot">
+        <span class="modal-msg" id="schedMsg"></span>
+        <button class="btn-secondary" id="schedCancel">Cancel</button>
+        <button class="btn-primary" id="schedSave">Create shortcut</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ServiceNow (MCP) connection modal -->
+  <div class="modal-overlay" id="snOverlay">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="snTitle">
+      <div class="modal-head">
+        <h3 id="snTitle">🔌 ServiceNow (MCP)</h3>
+        <button class="modal-x" id="snClose" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="snStatus" class="sched-note" style="margin:0 0 8px"></div>
+        <label for="snUrl">Instance URL</label>
+        <input id="snUrl" type="url" placeholder="https://dev000000.service-now.com" />
+        <label for="snUser">Username</label>
+        <input id="snUser" type="text" placeholder="admin" autocomplete="off" />
+        <label for="snPass">Password</label>
+        <div style="position:relative;display:flex">
+          <input id="snPass" type="password" placeholder="••••••••" autocomplete="off" style="flex:1;padding-right:54px" />
+          <button type="button" id="snPassToggle" aria-label="Show password" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);min-width:0;padding:3px 8px;font-size:11px;background:var(--bg-hover);border:1px solid var(--border-color);color:var(--text-secondary);border-radius:5px;cursor:pointer">Show</button>
+        </div>
+        <label for="snCsv">Multiple instances (CSV — one per line: <code>url,username,password</code>)</label>
+        <textarea id="snCsv" rows="4" spellcheck="false" autocomplete="off" placeholder="https://dev000000.service-now.com,admin,pass1&#10;https://dev000000.service-now.com,admin,pass2" style="width:100%;background:var(--bg-tertiary);color:var(--text-primary);border:1px solid var(--border-color);border-radius:6px;padding:9px;font-family:monospace;font-size:12px;resize:vertical"></textarea>
+        <div class="sched-warn">⚠ Credentials are stored locally in this browser (not synced). Use developer/PDI instances — avoid production passwords. Each child sub-agent uses the row matching its instance. Queries are read-only; record updates (sn_update_record) only run when you allow them.</div>
+      </div>
+      <div class="modal-foot">
+        <span class="modal-msg" id="snMsg"></span>
+        <button class="btn-secondary" id="snDisconnect">Disconnect</button>
+        <button class="btn-primary" id="snConnect">Connect</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="sidepanel.js" type="module"></script>
+  <script src="prompt-builder-ui.js" type="module"></script>
+</body>
+</html>

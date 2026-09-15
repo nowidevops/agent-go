@@ -1,0 +1,116 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Prompt Builder — Agent Go</title>
+  <!-- Standalone (detached-window) Prompt Builder. Same element IDs as the
+       side-panel modal, driven by the SAME prompt-builder-ui.js — it detects
+       standalone mode by the missing #pbOverlay. localStorage is shared with
+       the panel, so history / session / zoom stay in sync. Author: iDevOpsLLC -->
+  <style>
+    :root {
+      --bg-primary: #1E1E1E; --bg-secondary: #252526; --bg-tertiary: #2D2D2D; --bg-hover: #3C3C3C;
+      --text-primary: #D4D4D4; --text-secondary: #808080; --accent-blue: #569CD6; --border-color: #404040;
+      --text-on-accent: #fff;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; height: 100vh; display: flex; flex-direction: column; background: var(--bg-primary); color: var(--text-primary); font-family: "JetBrains Mono", Consolas, monospace; font-size: 13px; line-height: 1.45; }
+    .head { display: flex; align-items: center; gap: 4px; padding: 12px 14px; border-bottom: 1px solid var(--border-color); background: var(--bg-secondary); }
+    .head h3 { margin: 0; font-size: 14px; flex: 1; }
+    .modal-x { background: transparent; border: none; color: var(--text-secondary); cursor: pointer; font-size: 15px; padding: 2px 6px; border-radius: 6px; }
+    .modal-x:hover { background: var(--bg-hover); color: var(--text-primary); }
+    .body { flex: 1; overflow-y: auto; padding: 14px; }
+    label { display: block; font-size: 12px; color: var(--text-secondary); margin: 10px 0 4px; }
+    textarea, select { width: 100%; background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px; font: inherit; }
+    textarea:focus, select:focus { outline: none; border-color: var(--accent-blue); }
+    #pbOut { min-height: 260px; max-height: 60vh; overflow-y: auto; resize: vertical; }
+    .btn-secondary, .btn-primary { border-radius: 6px; padding: 7px 14px; cursor: pointer; font-family: inherit; font-size: 12px; border: 1px solid var(--border-color); }
+    .btn-secondary { background: var(--bg-tertiary); color: var(--text-primary); }
+    .btn-secondary:hover { background: var(--bg-hover); }
+    .btn-primary { background: var(--accent-blue); color: var(--text-on-accent); border-color: var(--accent-blue); }
+    .btn-primary:hover { filter: brightness(1.08); }
+    .pb-model { border: 1px solid var(--accent-blue); color: var(--accent-blue); border-radius: 10px; padding: 1px 8px; font-size: 10px; white-space: nowrap; }
+    button { font-family: inherit; }
+    .pb-chip { background: transparent; border: 1px solid var(--border-color); color: var(--text-secondary); border-radius: 10px; padding: 3px 9px; font-size: 11px; cursor: pointer; }
+    .pb-chip:hover { background: var(--bg-hover); color: var(--text-primary); }
+    .pb-chip.active { border-color: var(--accent-blue); color: var(--accent-blue); }
+    .note { color: var(--text-secondary); }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
+  </style>
+</head>
+<body>
+  <div class="head">
+    <h3 id="pbTitle">✍️ Prompt Builder</h3>
+    <button class="modal-x" id="pbZoomOut" title="Smaller text (Ctrl+scroll down in the box)" aria-label="Zoom out" style="font-size:12px">A−</button>
+    <button class="modal-x" id="pbZoomIn" title="Larger text (Ctrl+scroll up in the box)" aria-label="Zoom in" style="font-size:15px">A+</button>
+  </div>
+  <div class="body">
+    <label for="pbGoal">What do you want the agent to do? (rough is fine)</label>
+    <div id="pbChips" style="display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 6px">
+      <button class="pb-chip" data-preset="servicenow" data-tpl="In my ServiceNow instance <instance URL>, build a <artifact type, e.g. Business Rule> named <name> on table <table> that <exact behavior>. Verify it saved and is active.">⚙️ SN build</button>
+      <button class="pb-chip" data-preset="review" data-tpl="Do a code review of the <artifact> currently open in my ServiceNow instance for correctness, security, and best practices. Read-only — change nothing.">🔍 Code review</button>
+      <button class="pb-chip" data-preset="factfinding" data-tpl="Fact finding for ServiceNow user story <STORY NUMBER, or URL, or file path> in <instance URL>: (1) read the story, (2) find and list every artifact involved in its requirements, (3) re-write the story in a clear, implementation-ready format any AI model can implement. Read-only — change nothing.">🔎 Fact finding</button>
+      <button class="pb-chip" data-preset="postdeploy" data-tpl="Post-deployment validation in ServiceNow.&#10;Source Instance: <SOURCE INSTANCE URL> (NON-PRODUCTION — DEV)&#10;Target Instance: <TARGET INSTANCE URL> (NON-PRODUCTION — TEST | PRODUCTION)&#10;Parent Update Set: <PARENT UPDATE SET URL>&#10;Child Update Set: <CHILD UPDATE SET URL, or none>&#10;Story: <STORY NUMBER OR URL>&#10;Verify and validate the deployed update set content (scripts, configurations, and everything else in the payload), smoke-test the story's acceptance criteria if the target is NON-PRODUCTION, report every issue found, and give the click-by-click steps.">🚀 Post deployment</button>
+      <button class="pb-chip" data-preset="research" data-tpl="Do deep research on <topic> across several sources and give me a consolidated summary with a cited URL for every claim. Don't invent figures.">📚 Research</button>
+      <button class="pb-chip" data-preset="browser" data-tpl="On <URL>, <what to do>. Stop before <any irreversible step, e.g. submitting> and show me what you found/entered.">🌐 Browser task</button>
+      <button class="pb-chip" data-preset="teams" data-tpl="In my open Microsoft Teams conversation (https://teams.cloud.microsoft/), read the 5 most recent messages and draft a context-inferred reply into the compose box. Do NOT post — I will say 'APPROVED — SEND IT' when you may.">💬 Teams reply</button>
+      <button class="pb-chip" data-preset="slack" data-tpl="In my open Slack channel (https://app.slack.com/), enumerate the human-to-human messages, I'll pick one, then draft a reply and type it into the composer. Do NOT send — I will send it myself.">💬 Slack reply</button>
+    </div>
+    <div id="pbSnAreas" hidden style="margin:0 0 6px">
+      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px">ServiceNow focus areas (multi-select — scopes the prompt + grounds the agent's API reference):</div>
+      <div style="display:flex;flex-wrap:wrap;gap:5px">
+        <button class="pb-chip pb-area">GlideAjax</button>
+        <button class="pb-chip pb-area">Business Rule</button>
+        <button class="pb-chip pb-area">Client Script</button>
+        <button class="pb-chip pb-area">Script Include</button>
+        <button class="pb-chip pb-area">UI Policy</button>
+        <button class="pb-chip pb-area">UI Action</button>
+        <button class="pb-chip pb-area">Catalog Item</button>
+        <button class="pb-chip pb-area">Record Producer</button>
+        <button class="pb-chip pb-area">Flow Designer</button>
+        <button class="pb-chip pb-area">ACL</button>
+        <button class="pb-chip pb-area">Scheduled Job</button>
+        <button class="pb-chip pb-area">Fix Script</button>
+        <button class="pb-chip pb-area">Transform Map</button>
+        <button class="pb-chip pb-area">Scripted REST API</button>
+        <button class="pb-chip pb-area">Service Portal Widget</button>
+        <button class="pb-chip pb-area">Notification</button>
+        <button class="pb-chip pb-area">ATF</button>
+        <button class="pb-chip pb-area">CMDB / IRE</button>
+      </div>
+    </div>
+    <textarea id="pbGoal" rows="3" placeholder="e.g. open the Projects folder on my dashboard  ·  compare pricing on these 3 vendor sites  ·  review this widget's server script"></textarea>
+    <select id="pbHistory" style="margin-top:6px;width:100%">
+      <option value="">🕘 Recent prompts…</option>
+    </select>
+    <label style="display:flex;align-items:center;gap:8px;margin-top:6px;font-weight:normal;cursor:pointer">
+      <input type="checkbox" id="pbUsePage" checked style="width:auto" /> Include my active tab's URL as context
+    </label>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+      <button class="btn-secondary" id="pbAttach" title="Attach images (vision-described) or text files (content quoted) as extra context — max 5">📎 Attach files</button>
+      <span class="note" style="font-size:11px">images vision-described · text quoted · max 5</span>
+      <span id="pbVision" class="pb-model" hidden></span>
+    </div>
+    <div id="pbFiles" style="display:flex;flex-wrap:wrap;gap:5px;margin-top:4px"></div>
+    <input type="file" id="pbFilePick" accept="image/*,.txt,.md,.js,.json,.csv,.xml,.html,.css,.log,.yml,.yaml" multiple style="display:none" />
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button class="btn-primary" id="pbGen">Generate prompt</button>
+      <button class="btn-secondary" id="pbRegen" title="Run the same goal again for another take" hidden>↻ Regenerate</button>
+      <button class="btn-secondary" id="pbClear" style="margin-left:auto" title="Clear the goal and the generated prompt — start over (history keeps past generations)">🗑 Clear</button>
+    </div>
+    <div id="pbStatus" class="note" role="status" aria-live="polite" style="margin-top:6px;font-size:12px"></div>
+    <div id="pbResultWrap" hidden>
+      <label for="pbOut" style="margin-top:10px;display:flex;align-items:baseline;gap:8px">Generated prompt (edit freely) <span id="pbModel" class="pb-model" title="The AI model that generated this prompt" hidden></span> <span id="pbCount" style="font-weight:normal;font-size:11px;color:var(--text-secondary);margin-left:auto"></span></label>
+      <textarea id="pbOut" rows="10"></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+        <button class="btn-primary" id="pbUse">Insert into composer</button>
+        <button class="btn-secondary" id="pbCopy">📋 Copy</button>
+        <button class="btn-secondary" id="pbDownload" title="Save the prompt as a .md file into Downloads">⬇ Download</button>
+        <button class="btn-secondary" id="pbSaveFolder" title="Save the prompt as a .md file into your chosen folder (first click picks the folder)">💾 Save to folder</button>
+        <button class="btn-secondary" id="pbPickFolder" style="padding-left:8px;padding-right:8px" title="Choose / replace the save folder" aria-label="Choose save folder">📂</button>
+      </div>
+    </div>
+  </div>
+  <script src="prompt-builder-ui.js" type="module"></script>
+</body>
+</html>
