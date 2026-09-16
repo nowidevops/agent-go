@@ -1,7 +1,8 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-product="go">
 <head>
   <meta charset="UTF-8" />
+  <script src="theme-boot.js"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Agent Go — Settings</title>
   <style>
@@ -48,9 +49,13 @@
     .status.show { display: block; }
     .status.ok { border-left-color: var(--accent-green); }
     .status.err { border-left-color: var(--accent-red); color: var(--accent-red); }
+      .packGroup { margin-top: 14px; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 6px; }
+    .packGroup .packGroupTitle { font-size: 13px; font-weight: 600; color: var(--accent-green); margin-bottom: 2px; }
+    .packGroup > label { margin-top: 8px; }
   </style>
+  <link rel="stylesheet" href="theme.css" />
 </head>
-<body>
+<body class="settings-page">
   <div class="viewbar">
     <button class="secondary" id="zoomOut" title="Zoom out">−</button>
     <span id="zoomPct">100%</span>
@@ -59,12 +64,15 @@
     <button class="secondary" id="detachBtn" title="Open Settings in its own floating window">⧉ Detach</button>
   </div>
   <div class="wrap">
-    <h1>Agent Go — Settings</h1>
+    <div class="settings-head">
+      <h1>Agent Go — Settings</h1>
+      <button type="button" id="themeCycle" class="theme-cycle" title="Theme: System. Click to change" aria-label="Color theme: System. Click to change"><span class="tc-ico" aria-hidden="true"></span><span class="tc-label">System</span></button>
+    </div>
 
     <!-- "A newer pack is available" (2026-09-03). Filled by renderUpdateNotice() in options.js from the
          stored daily check; hidden until a newer version is known. -->
     <div class="card" id="updateCard" style="display:none;border-color:var(--accent-green)">
-      <h2 style="font-size:15px;color:var(--accent-green);margin:0 0 6px">Update available</h2>
+      <h2>Update available</h2>
       <div id="updateText" style="font-size:12px;margin-bottom:8px"></div>
       <div class="hint" id="updateSteps" style="margin:0 0 10px"></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
@@ -75,7 +83,7 @@
 
     <div class="card">
       <!-- ===== Agent Go: account, plan, model, BYOK (cloud sibling — no local Ollama, no vendor keys) ===== -->
-      <h2 style="font-size:15px;color:var(--accent-green);margin:0 0 6px">Account</h2>
+      <h2>Account</h2>
       <div id="signedOut">
         <div class="grid2">
           <input id="email" type="email" placeholder="email" autocomplete="username" />
@@ -102,23 +110,23 @@
         <button id="updateCheckBtn" type="button" style="padding:3px 8px;font-size:11px;background:var(--bg-tertiary);color:var(--text-primary);border:1px solid var(--border-color)">Check for updates</button>
       </div>
 
-      <h2 style="font-size:15px;color:var(--accent-green);margin:18px 0 6px">Plan &amp; Credits</h2>
+      <h2>Plan &amp; Credits</h2>
       <div class="hint" style="margin-top:0">Each metered agent turn costs credits. Client-side file / ServiceNow tools are free.</div>
       <div class="actions" style="margin-top:8px">
         <button id="buyCreditsBtn">Buy credits</button>
       </div>
 
-      <h2 style="font-size:15px;color:var(--accent-green);margin:18px 0 6px">Model</h2>
+      <h2>Model</h2>
       <label>Agent model</label>
-      <select id="model"><option value="">Auto (best for your plan)</option></select>
-      <div class="hint">Your plan limits which models are allowed; the backend enforces this. Flagships (Opus / Sol / Gemini Pro) require a paid plan.</div>
+      <select id="model"><option value="">Auto — Kimi K3 where your plan includes it, GLM 5.2 on Free and Starter (default)</option></select>
+      <div class="hint">Auto runs Kimi K3 where your plan includes it and GLM 5.2 on Free and Starter. Your plan limits which models are allowed; the backend enforces this. Flagships (Opus / Sol / Gemini Pro) require a paid plan.</div>
       <div id="backendUrlRow" style="display:none"><!-- admin-only: revealed by refreshAccount() when tier === admin -->
         <label>Backend URL <span style="color:var(--text-secondary);font-size:11px">(admin only)</span></label>
         <input id="backendUrl" placeholder="https://ai.nowidevops.com/api/llm-go" />
       </div>
 
       <div id="byokCard" style="display:none"><!-- usage/admin tier only: revealed after sign-in -->
-        <h2 style="font-size:15px;color:var(--accent-green);margin:18px 0 6px">Bring your own key</h2>
+        <h2>Bring your own key</h2>
         <label>Provider</label>
         <select id="byokProvider">
           <option value="">Off — use Agent Go models</option>
@@ -170,6 +178,7 @@
       <summary style="cursor:pointer;font-size:15px;color:var(--accent-green);font-weight:600">Advanced settings — local machine bridges (optional)</summary>
       <div class="hint" style="margin:6px 0 10px">For users who want the agent to reach beyond the browser tab: voice input through a local Whisper server, OS-level mouse/keyboard/screenshots, and shell commands, each through a small bridge that runs on <b>your</b> machine and answers only on loopback. Download the bridges pack from the Agent Go page (“Local machine bridges”), follow its INSTALL.md, then fill in the fields below. The two powerful options (desktop control, Run commands) are OFF until you switch them on and need the desktop token; every desktop or shell action asks for your approval first. Both URLs must point at this machine (<code>localhost</code> / <code>127.0.0.1</code>). The desktop token is what keeps other programs on this computer from using the desktop bridge: treat it like a password. What the agent sees through these bridges (screenshots, command output, transcribed speech) is sent to the model you use, like everything else it reads.</div>
 
+<h2>Voice input (Whisper)</h2>
       <label>Local Whisper server URL (voice input)</label>
       <input id="whisperUrl" placeholder="http://localhost:8765" />
       <div class="hint">Start it with whisper-server\start-whisper.bat. If it's not running, voice input falls back to Chrome's Web Speech (cloud).</div>
@@ -178,6 +187,7 @@
         <span id="whisperStatus" class="hint" style="margin-top:0"></span>
       </div>
 
+      <h2>Desktop control and shell (powerful, off by default)</h2>
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
         <input type="checkbox" id="desktopControlEnabled" style="width:auto" />
         🖥️ Enable desktop control — OS mouse / keyboard / screenshot (opt-in)
@@ -203,10 +213,16 @@
       <div class="hint"><strong>OFF by default — very powerful.</strong> When ON, the agent gets <code>run_command</code> to run shell commands (npm, git, node, python, tests, builds, linters) on your machine and read their output — so it can VERIFY code changes. Separate from desktop control because shell exec is even more powerful. Needs the same <code>desktop-server</code> running (and token above). Every command asks for your approval first. A denylist blocks OS-destructive patterns, but an approved command runs with your full privileges — like a terminal.</div>
 
       <label>Project directory (working dir for Run commands)</label>
-      <input id="projectDir" placeholder="C:\projects\my-app" autocomplete="off" />
+      <input id="projectDir" placeholder="C:\redacted\path" autocomplete="off" />
       <div class="hint"><code>run_command</code>'s default working directory. The browser hides the connected folder's real OS path, so set your repo root here (or the agent must pass an explicit cwd). Also where <code>git</code> runs.</div>
       </details><!-- /advancedLocal -->
 
+      <h2>Knowledge packs</h2>
+      <div class="hint" style="margin:0 0 4px">Packs teach the agent one kind of work. They load only when a task calls for them, grouped here by use case. Each one is a checkbox; Save applies the change to the next run.</div>
+
+      <div class="packGroup">
+      <div class="packGroupTitle">🧩 ServiceNow</div>
+      <div class="hint" style="margin:0 0 6px">Platform tools and the two workflow builders. Inject on ServiceNow tasks or a service-now.com tab.</div>
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
         <input type="checkbox" id="snPackEnabled" style="width:auto" />
         Inject the ServiceNow knowledge pack (opt-in)
@@ -224,23 +240,19 @@
         ServiceNow Workflow Studio pack (opt-in)
       </label>
       <div class="hint">Off by default. When ON, tasks about the MODERN builder — Workflow Studio / Flow Designer flows, subflows, actions, triggers, playbooks, decision tables (sys_hub_* / sys_pd_* / sys_decision*) — get a bundled pack with the concept map + data model, the honest REST-safe vs UI-only line (graph authoring goes through the Studio UI; the engine runs a compiled snapshot), Studio SPA navigation recipes with verify-after-mutation REST queries, and REST-safe decision-table row CRUD. Injects on top of the ServiceNow pack (enable both).</div>
+      </div><!-- /packGroup -->
 
-      <!-- ADMIN-ONLY (owner directive 2026-09-02): Fable behavior pack + day-trading + M1 Finance settings are hidden for every
-           non-admin tier. options.js reveals this block from refreshAccount() when the signed-in tier is
-           "admin", and the Save handler forces these settings OFF whenever the block is hidden. -->
-      <div id="adminOnlyPacks" style="display:none">
-      <div class="hint" style="margin:6px 0 2px;color:var(--accent-orange, #CE9178)">🔒 Admin-only: Fable behavior pack, day-trading and M1 Finance packs</div>
-      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-        <input type="checkbox" id="fablePackEnabled" style="width:auto" />
-        Inject the "act like Fable 5.1" behavior pack (opt-in)
-      </label>
-      <div class="hint">Off by default. When ON, every task gets Fable 5.1's operating discipline (diagnose first, real data over assumptions, verify before claiming done, stop at irreversible steps). Read LIVE from fable-behavior.md at the URL below; a bundled copy is used if unreachable.</div>
-
+      <!-- DAY-TRADING packs (owner directive 2026-09-04): shown to the usage and admin plans; options.js
+           reveals this block from refreshAccount() and the Save handler forces these settings OFF
+           whenever the block is hidden (free tier / signed out). PAPER trading only. -->
+      <div id="tradingPacks" class="packGroup" style="display:none">
+      <div class="packGroupTitle">📈 Stocks trading (paper)</div>
+      <div class="hint" style="margin:0 0 6px">Usage and admin plans. Paper trading on the Day Trading page only; the pack refuses to place a real order. Turn on the agent pack first; the others build on it.</div>
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
         <input type="checkbox" id="tradingPackEnabled" style="width:auto" />
-        Inject the PAPER day-trading agent pack (opt-in)
+        Inject the PAPER day-trading agent pack (on by default)
       </label>
-      <div class="hint">Off by default. URL-gated to the Day Trading page only. Default mode = read / analyze ONLY (the pack hard-forbids placing orders unless PREFILL/SUBMIT below is enabled). Recommends trades against numeric rules, reports every decision in its answer (server auto-records submitted orders; no manual journaling), honors the server's CORE4 scanner-signal gate and is aware of the ORB Stocks-in-Play engine rows, and stays on PAPER. Read LIVE from trading-strategy.md at the URL below; a bundled copy is used if unreachable.</div>
+      <div class="hint">ON by default since 2026-09-04 (untick to disable). URL-gated to the Day Trading page only. Adds the Research tab / Thesis Watch rules (long-term bucket only; intraday cycles never open Research). Default mode = read / analyze ONLY (the pack hard-forbids placing orders unless PREFILL/SUBMIT below is enabled). Recommends trades against numeric rules, reports every decision in its answer (server auto-records submitted orders; no manual journaling), honors the server's CORE4 scanner-signal gate and is aware of the ORB Stocks-in-Play engine rows, and stays on PAPER. Read LIVE from trading-strategy.md at the URL below; a bundled copy is used if unreachable.</div>
 
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
         <input type="checkbox" id="scalpingPackEnabled" style="width:auto" />
@@ -252,13 +264,13 @@
         <input type="checkbox" id="tradingPrefillEnabled" style="width:auto" />
         Day-trading agent: PREFILL the order form (Phase 2)
       </label>
-      <div class="hint">Off by default. Requires the day-trading agent pack above. When ON, the agent may FILL the Place Manual Order form (symbol, side, qty, type, stop, target) but is hard-blocked from clicking "Submit Order" — it stages the order for YOU to review and submit. The submit-guard lives in code, not the strategy file.</div>
+      <div class="hint">ON by default since 2026-09-04. Requires the day-trading agent pack above. When ON, the agent may FILL the Place Manual Order form (symbol, side, qty, type, stop, target) but is hard-blocked from clicking "Submit Order" — it stages the order for YOU to review and submit. The submit-guard lives in code, not the strategy file.</div>
 
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
         <input type="checkbox" id="paperOrderSubmissionEnabled" style="width:auto" />
         ⚠️ Day-trading agent: AUTONOMOUS submit (PAPER)
       </label>
-      <div class="hint"><strong>OFF by default — turn on only deliberately.</strong> When ON, the agent fills the form, runs the dry-run Validate, and <strong>clicks Submit Order itself</strong> on the PAPER account (no human click). It still must pass the server-side brakes (paper-only, R:R, sizing, lockout, market hours). When OFF, the Submit Order button is hard-blocked for the agent at the tool level. Stored locally on this machine only (never synced). PAPER only.</div>
+      <div class="hint"><strong>ON by default since 2026-09-04 (owner directive) — untick to hard-block the Submit button.</strong> When ON, the agent fills the form, runs the dry-run Validate, and <strong>clicks Submit Order itself</strong> on the PAPER account (no human click). It still must pass the server-side brakes (paper-only, R:R, sizing, lockout, market hours). When OFF, the Submit Order button is hard-blocked for the agent at the tool level. Stored locally on this machine only (never synced). PAPER only.</div>
 
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
         <input type="checkbox" id="riskPostureEnabled" style="width:auto" />
@@ -266,18 +278,56 @@
       </label>
       <div class="hint"><strong>ON by default</strong> because it can only REDUCE risk. Gives the agent the <code>set_session_max_loss</code> tool (prefill/submit modes only): it may TIGHTEN today's session max-loss cap on market insights (VIX spike, choppy tape, losing morning). Server-enforced: can NEVER loosen past your dashboard max-loss ceiling, floor $100, max 3 changes/day with 5 min between, every change audited with a rationale, auto-expires at the ET session boundary. The hard BLOCK/FLATTEN ladder and stage selection stay operator-only. Turn OFF to remove the tool entirely.</div>
 
+      <div id="liveTradingPacks">
+      <div class="packGroupTitle packGroupTitle-danger" style="margin-top:14px">💵 Stocks trading — LIVE (REAL MONEY)</div>
+      <div class="hint" style="margin:0 0 6px"><strong>Real funds.</strong> A separate pack for the Live Trading page (live-trading.html) — it never runs on the paper page and the paper pack never runs on the live page. Every order-permission toggle here is OFF by default and must be enabled on purpose (risk posture is ON: it can only tighten). The server-side live module keeps its own validator, caps and loss ladder.</div>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="liveTradingPackEnabled" style="width:auto" />
+        ⚠️ Inject the LIVE (real-money) trading agent pack (off by default)
+      </label>
+      <div class="hint">Active-tab gated to the Live Trading page only (no task-text or open-tab trigger). Default mode = read / analyze ONLY.</div>
+
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="liveScalpingPackEnabled" style="width:auto" />
+        Live agent: SCALPING overlay (opt-in, real money)
+      </label>
+      <div class="hint">Off by default. Requires the live pack above. Own served file (live-scalping-strategy.md); a paper-scalp edit never leaks here.</div>
+
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="liveTradingPrefillEnabled" style="width:auto" />
+        Live agent: PREFILL the order form (a human clicks Submit)
+      </label>
+      <div class="hint">Off by default. Requires the live pack. The agent stages a real-money order; you click Submit Order.</div>
+
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="liveOrderSubmissionEnabled" style="width:auto" />
+        ⚠️⚠️ Live agent: AUTONOMOUS submit (LIVE — REAL MONEY)
+      </label>
+      <div class="hint"><strong>OFF by default. This lets the agent place orders with real money on its own.</strong> Stored locally on this machine only (never synced). Requires the live pack. content.js hard-blocks every Submit vector on the live page while this is off.</div>
+
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="liveRiskPostureEnabled" style="width:auto" />
+        Live agent: risk posture — tighten session max loss (default on)
+      </label>
+      <div class="hint">ON by default because it can only REDUCE risk: the agent may TIGHTEN today's live session max-loss cap (server-enforced tighten-only, $100 floor, 3/day, audited).</div>
+      </div>
+
       <div style="margin-top:8px">
         <label>Day-trading: extra excluded symbols (never day-trade)</label>
         <input id="additionalExcludedSymbols" type="text" placeholder="e.g. PYPL, UBER, DIS" />
-        <div class="hint">Comma-separated. Day-trade exclusions ADDED to the built-in long-term-holding list (AMD, GOOGL, MSFT, NVDA, META, TSM, CRM, ADBE, PLTR, COST, BRK.B, JNJ). Use this as your long-term portfolio changes. This list can only EXTEND the exclusion — it can't remove a built-in name. Broad ETFs (SPY/QQQ/VOO) are intentionally never excluded (regime proxies).</div>
+        <div class="hint">Comma-separated, optional. Since 2026-09-10 there is NO built-in exclusion list — the old long-term-holdings list (AMD, GOOGL, MSFT, NVDA, META, TSM, CRM, ADBE, PLTR, COST, BRK.B, JNJ) was retired by owner mandate and those names are ordinary day-trade candidates again, on the server too. Anything you type here is still honored. Leave blank to exclude nothing.</div>
       </div>
 
+      </div><!-- /tradingPacks -->
+
+      <div class="packGroup">
+      <div class="packGroupTitle">💬 Chat and collaboration</div>
+      <div class="hint" style="margin:0 0 6px">Read-only reply drafters for the chat apps you are signed into.</div>
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-        <input type="checkbox" id="m1PackEnabled" style="width:auto" />
-        💰 M1 Finance portfolio explorer — READ-ONLY (real-money 401k)
+        <input type="checkbox" id="inboxPackEnabled" style="width:auto" />
+        ✉️ Inbox triage + reply drafter — READ-ONLY mailbox (opt-in)
       </label>
-      <div class="hint"><strong>OFF by default.</strong> URL-gated to <code>dashboard.m1.com/d/invest/&hellip;/portfolio</code> only. This is your <strong>real-money 401(k)</strong>, so when ON the run is pinned to a <strong>fail-closed read-only tool allowlist</strong>: the agent gets ONLY read tools (read_page, query_elements, scroll, screenshot, web_search) — clicking, typing, navigation, trading, rebalancing, Pie edits, transfers, sub-agents, and login/auth are all <strong>mechanically impossible</strong>, not just discouraged. It explores what's working / profitable in your holdings and writes an insight report. Log in yourself first. Prefer a LOCAL model (cloud models would see your account data).</div>
-      </div><!-- /adminOnlyPacks -->
+      <div class="hint"><strong>OFF by default.</strong> URL-gated to <code>mail.google.com</code> and <code>outlook.office.com</code>. When ON, the agent reads the inbox, sorts every thread into NEEDS REPLY / WAITING ON THEM / ACTION / FYI / NOISE with a reason, and types a draft into the reply composer for the threads that need one. It never sends, archives, deletes, labels or forwards; <code>send_email</code> and <code>send_sms</code> are blocked in code for the run until you type the exact phrase <strong>APPROVED — SEND IT</strong>. Email content is never written to notes or files unless you ask for that message. Prefer a local model for private mail.</div>
 
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
         <input type="checkbox" id="teamsPackEnabled" style="width:auto" />
@@ -290,23 +340,39 @@
         💬 Slack auto-reply drafter — READ-ONLY (opt-in)
       </label>
       <div class="hint"><strong>OFF by default.</strong> URL-gated to <code>app.slack.com</code> / <code>slack.com</code>. When ON, the agent enumerates the human-to-human messages in the open channel, you pick one, and it <strong>drafts a reply and types it into the composer</strong> — but it is <strong>hard-forbidden from sending anything until you type the exact phrase APPROVED — SEND IT</strong> (same gate as the Teams pack; the side panel offers a one-click approval button). No partial match, no "go ahead", no "yes" unlocks it. Without the phrase it never clicks the Send button, never calls a <code>send_*</code> tool, and never presses Enter while the composer has focus (Enter sends in Slack — and stays forbidden even after approval; the approved send is one click of the send arrow, then a read-back verification). <code>fill_input</code> is always called with <code>submit: false</code>. It never edits/deletes/reacts to existing messages and never auto-loops without your confirmation. Open the channel yourself first. Reads private messages — <strong>prefer a LOCAL model</strong> (cloud models would see your Slack content).</div>
+      </div><!-- /packGroup -->
 
+      <div class="packGroup">
+      <div class="packGroupTitle">📚 Knowledge work (automatic)</div>
+      <div class="hint" style="margin:0 0 6px">These method packs have no switch. One loads when the request matches its shape, and every write is a draft or approval-gated. Look for the <code>⚙ &lt;pack&gt;</code> line at the start of a run.</div>
+      <div class="hint"><strong>Knowledge article &amp; SOP writer</strong> — "write a knowledge article for INC0010001", "create an SOP for onboarding". Draft in <code>kb_knowledge</code> or a document; never published.</div>
+      <div class="hint"><strong>Contract playbook review</strong> — "review this NDA against our playbook", "redline the MSA". Read-only memo with clause citations and redlines.</div>
+      <div class="hint"><strong>RFP response</strong> — "respond to this RFP using our answer library", "answer the security questionnaire". Cited answers plus a gap list.</div>
+      <div class="hint"><strong>Meeting follow-up</strong> — "follow up on this meeting", "action items from the transcript". Quoted action items; the follow-up is sent only on <strong>APPROVED — SEND IT</strong>.</div>
+      <div class="hint"><strong>Deep research</strong> — "do deep research on…", "compare vendors". Plan, parallel gather, verify, cite.</div>
+      <div class="hint"><strong>Root-cause analysis</strong> — "why does … fail", "debug …". Evidence-first, read-only diagnosis.</div>
+      <div class="hint"><strong>ServiceNow methods</strong> — code review, incident resolution, RCA and post-deployment validation inject on ServiceNow phrasing or a service-now.com tab (see the ServiceNow group).</div>
+      </div><!-- /packGroup -->
+
+      <div class="packGroup">
+      <div class="packGroupTitle">✍️ Writing and working method</div>
+      <div class="hint" style="margin:0 0 6px">How the agent writes and paces every task, whatever the site.</div>
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
         <input type="checkbox" id="unslopPackEnabled" style="width:auto" />
         ✍️ Unslop writing-quality pack — <strong>ON by default</strong>
       </label>
-      <div class="hint"><strong>ON by default</strong> (the only always-on pack — owner directive 2026-08-19). Injects a compact (~2KB) edit-pass rule set on <strong>every run</strong> so all final prose (replies, documents, summaries, emails) is stripped of AI tells before posting: puffery/promo vocabulary, "serves as / boasts", "not just X but Y", em dashes, chatbot phrases, filler, abstract metaphor jargon — plus plain-speech rules (active voice, say the mechanism or number, add voice/rhythm). Code blocks are exempt; documentation prose is not. Style overlay only — it stacks with every other pack and never changes what the agent does. Canonical skill: <code><local path> Untick to disable.</div>
+      <div class="hint"><strong>ON by default</strong> (the only always-on pack — owner directive 2026-08-19). Injects a compact (~2KB) edit-pass rule set on <strong>every run</strong> so all final prose (replies, documents, summaries, emails) is stripped of AI tells before posting: puffery/promo vocabulary, "serves as / boasts", "not just X but Y", em dashes, chatbot phrases, filler, abstract metaphor jargon — plus plain-speech rules (active voice, say the mechanism or number, add voice/rhythm). Code blocks are exempt; documentation prose is not. Style overlay only — it stacks with every other pack and never changes what the agent does. Canonical skill: <code>C:\redacted\path
 
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
         <input type="checkbox" id="implementationPhasesEnabled" style="width:auto" />
-        🧭 Inject the "implementation phases" pipeline pack (opt-in)
+        🧭 Inject the "implementation phases" pipeline pack — <strong>ON by default</strong> (uncheck to turn it off)
       </label>
-      <div class="hint">Off by default. When ON, every non-trivial task runs through the AgenticWorkflow phase pipeline as a self-discipline the agent narrates: <strong>plan → execute (with verify on research steps) → synthesize → review → reverify → repair → clarify → done</strong>. Trivial tasks collapse to plan→execute→done. The gate semantics carry over — review and reverify are independent (the agent deliberately switches lens so a phase never rubber-stamps its own output), a NO-GO triggers exactly ONE repair pass, and a dead-end surfaces a concrete clarify question instead of a silent ship. Read LIVE from implementation-phases.md at the URL below; a bundled copy is used if unreachable.</div>
+      <div class="hint"><strong>On by default</strong>; uncheck it here to turn it off for this profile. When ON, every non-trivial task runs through the AgenticWorkflow phase pipeline as a self-discipline the agent narrates: <strong>plan → execute (with verify on research steps) → synthesize → review → reverify → repair → clarify → done</strong>. Trivial tasks collapse to plan→execute→done. The gate semantics carry over — review and reverify are independent (the agent deliberately switches lens so a phase never rubber-stamps its own output), a NO-GO triggers exactly ONE repair pass, and a dead-end surfaces a concrete clarify question instead of a silent ship. Read LIVE from implementation-phases.md at the URL below; a bundled copy is used if unreachable.</div>
 
       <!-- ADMIN-ONLY (owner directive 2026-09-02): the code-enforced phase engine + role-chain JSON /
            domain presets multiply the metered turns per task and name models outside the plan;
            hidden for every non-admin tier, and Save forces the engine OFF for them. -->
-      <div id="adminOnlyPhase" style="display:none">
+      <div id="adminOnlyPhase" class="owner-hidden" style="display:none">
       <div class="hint" style="margin:6px 0 2px;color:var(--accent-orange, #CE9178)">🔒 Admin-only: phase engine and role chains</div>
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
         <input type="checkbox" id="phaseEngineEnabled" style="width:auto" />
@@ -314,6 +380,7 @@
       </label>
       <div class="hint"><strong>Opt-in</strong> (off by default) — turn it on per-profile when you want gated runs. When ON, every run passes through the <strong>code-enforced phase pipeline</strong>: PLAN (the orchestrator — your selected header model — decomposes multi-part tasks; single-focus tasks fast-path) → EXECUTE (subtasks with dependency isolation) → SYNTHESIZE → deterministic evidence invariants (every factual claim must cite real tool observations — value mismatches and uncited claims force NO-GO in pure code) → REVIEW + REVERIFY by <strong>independent models</strong> (defaults: glm-5.2:cloud review / deepseek-v4-pro:0813-cloud reverify — ⚠️ :cloud gate models send the draft + evidence to Ollama's servers) → auto-repair → clarify questions if still blocked. When OFF, runs use the plain agent loop. Supersedes the prompt-only "implementation phases" pack above when enabled.</div>
 
+      <h2>Phase engine, search and pack sources</h2>
       <label for="phaseModels">Phase-engine role chains (JSON, optional)</label>
       <label for="phasePreset" style="font-size:11px;color:var(--text-secondary);margin:0 0 4px">Domain preset — pick one to fill the JSON below (then Save):</label>
       <select id="phasePreset" style="margin-bottom:6px">
@@ -327,6 +394,27 @@
       <textarea id="phaseModels" rows="4" spellcheck="false" placeholder='{"roles": {"review": [{"provider":"ollama","model":"deepseek-v4-pro:0813-cloud"}], "orchestrator": [{"provider":"$SELECTED","model":"$SELECTED"}]}}'></textarea>
       <div class="hint">Leave empty for the defaults — PURE Ollama-cloud, matched to each model's strength (subscription-billed, no API keys, no desktop bridge needed): <code>deepseek-v4-pro:0813-cloud</code> (agent workflows + long context) orchestrates + heads repair and reverify, <code>glm-5.2:cloud</code> (highest coding score) heads review, <code>kimi-k2.7-code:cloud</code> (cost) is the gate fallback, (Qwen3-Coder-480B was removed from the gate chains 2026-07-19 — it can't emit the strict verdict grammar and fail-closed every review to NO-GO; it's a strong <em>drafter</em>, so use it as the header model or via the Custom provider, not as a gate.) OpenAI models, fable-5.1 and opus-5 are out of the defaults (slow) but stay selectable here. <code>kimi-k3:cloud</code> (Moonshot's flagship — vision + tools + thinking) is selectable in the Agent-model dropdown and usable in these chains, but is deliberately <strong>not</strong> a default: unlike the other <code>:cloud</code> models it is <strong>not covered by the Max plan</strong> and bills against your Ollama <em>extra usage</em> balance, so putting it in a gate chain meters every gated run (review + reverify + repair) instead of costing $0. Prove it holds the verdict grammar first, then promote it. <code>deepseek-v4-flash:cloud</code> (DeepSeek-V4 preview — MoE, 284B total / 13B activated, tools + thinking, 1M-token context) is also selectable in the Agent-model dropdown and usable in these chains — built for efficient reasoning over long context, so it's a promising fast drafter/researcher; it's a <strong>preview</strong> release, so prove it holds the verdict grammar before promoting it into a gate chain. Roles: <code>orchestrator</code> (PLAN/SYNTHESIZE/CLARIFY), <code>review</code>, <code>reverify</code> (independent gates), <code>repair</code>. Placeholders: <code>$SELECTED</code> = the header model (any provider), <code>$LOCAL</code> = the local Ollama model. Providers: ollama / openai / gemini / anthropic / xai / claude-sub / codex-sub. Invalid JSON is ignored (defaults apply). Options: <code>"gateMode":"strict"</code> (full deterministic-citation enforcement; default is AWF-style — model judgment decides), <code>"maxRepairs":1-5</code> (default 3), <code>"gateWallSec":60-600</code> (per-gate wall clock, default 240).</div>
       </div><!-- /adminOnlyPhase -->
+      </div><!-- /packGroup -->
+
+      <!-- ADMIN-ONLY (owner directive 2026-09-02; day-trading moved to its own usage+admin block 2026-09-04): Fable behavior pack + M1 Finance settings are hidden for every
+           non-admin tier. options.js reveals this block from refreshAccount() when the signed-in tier is
+           "admin", and the Save handler forces these settings OFF whenever the block is hidden. -->
+      <div id="adminOnlyPacks" class="packGroup" style="display:none">
+      <div class="packGroupTitle" style="color:var(--accent-orange, #CE9178)">🔒 Admin-only extras</div>
+      <div class="hint" style="margin:0 0 6px">Fable behavior pack. Hidden on every other plan.</div>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="fablePackEnabled" style="width:auto" />
+        Inject the "act like Fable 5.1" behavior pack (opt-in)
+      </label>
+      <div class="hint">Off by default. When ON, every task gets Fable 5.1's operating discipline (diagnose first, real data over assumptions, verify before claiming done, stop at irreversible steps). Read LIVE from fable-behavior.md at the URL below; a bundled copy is used if unreachable.</div>
+
+      <label class="owner-hidden" style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="m1PackEnabled" style="width:auto" />
+        💰 M1 Finance portfolio explorer — READ-ONLY (real-money 401k)
+      </label>
+      <div class="hint owner-hidden"><strong>OFF by default.</strong> URL-gated to <code>dashboard.m1.com/d/invest/&hellip;/portfolio</code> only. This is your <strong>real-money 401(k)</strong>, so when ON the run is pinned to a <strong>fail-closed read-only tool allowlist</strong>: the agent gets ONLY read tools (read_page, query_elements, scroll, screenshot, web_search) — clicking, typing, navigation, trading, rebalancing, Pie edits, transfers, sub-agents, and login/auth are all <strong>mechanically impossible</strong>, not just discouraged. It explores what's working / profitable in your holdings and writes an insight report. Log in yourself first. Prefer a LOCAL model (cloud models would see your account data).</div>
+      </div><!-- /adminOnlyPacks -->
+
 
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
         <input type="checkbox" id="autoWebSearch" style="width:auto" />
@@ -344,15 +432,16 @@
       </label>
       <div class="hint">Off by default. When ON, the Diagnostics card below can summarize your stored run history (tool failure rates, step counts, common errors). 100% local — read-only over data already on this machine, nothing is sent anywhere.</div>
 
-      <label>ServiceNow phase-presets URL (knowledge pack source)</label>
-      <input id="phaseFilesUrl" placeholder="http://localhost:3000/sdlc-phases" />
-      <div class="hint">Used only when the pack is enabled above. Read LIVE from phase-08.md/phase-07.md here (no drift); a bundled copy is used if unreachable.</div>
-      <div class="actions" style="margin-top:6px">
+      <label class="owner-hidden">ServiceNow phase-presets URL (knowledge pack source)</label>
+      <input class="owner-hidden" id="phaseFilesUrl" placeholder="http://localhost:3000/sdlc-phases" />
+      <div class="hint owner-hidden">Used only when the pack is enabled above. Read LIVE from phase-08.md/phase-07.md here (no drift); a bundled copy is used if unreachable.</div>
+      <div class="actions owner-hidden" style="margin-top:6px">
         <button class="secondary" id="testPhase" type="button">Test</button>
         <span id="phaseStatus" class="hint" style="margin-top:0"></span>
       </div>
       </div><!-- /adminOnlyDiag -->
 
+      <h2>Agent behavior and limits</h2>
       <div class="row">
         <div>
           <label>Temperature</label>
@@ -396,7 +485,7 @@
 
     <details class="card" id="adminOnlyLearning" style="margin-top:22px;display:none"><!-- admin-only (owner directive 2026-09-02): lessons/trajectories are the owner's training data -->
       <summary style="cursor:pointer;list-style-position:outside">
-        <h2 style="font-size:15px;color:var(--accent-green);margin:0;display:inline">Learning (feedback &amp; lessons) <span style="font-size:11px;color:var(--accent-orange, #CE9178)">🔒 admin-only</span></h2>
+        <h2 style="display:inline">Learning (feedback &amp; lessons) <span style="font-size:11px;color:var(--accent-orange, #CE9178)">🔒 admin-only</span></h2>
         <span id="lessonCount" style="color:var(--text-secondary);font-size:11px;margin-left:8px"></span>
       </summary>
       <p style="font-size:12px;color:var(--text-secondary);margin:10px 0">
@@ -413,7 +502,7 @@
     </details>
 
     <div class="card" id="adminOnlyDiagCard" style="margin-top:22px;display:none"><!-- admin-only (2026-09-02): pairs with telemetryEnabled -->
-      <h2 style="font-size:15px;color:var(--accent-green);margin:0 0 6px">Diagnostics (local only) <span style="font-size:11px;color:var(--accent-orange, #CE9178)">🔒 admin-only</span></h2>
+      <h2>Diagnostics (local only) <span style="font-size:11px;color:var(--accent-orange, #CE9178)">🔒 admin-only</span></h2>
       <p style="font-size:12px;color:var(--text-secondary);margin:0 0 10px">
         A read-only summary of your stored run history — which tools fail most, how
         many steps runs take, and the most common errors. Nothing leaves this machine.
@@ -426,8 +515,8 @@
       <div id="diagOut" style="font-size:12px"></div>
     </div>
 
-    <div class="card" style="margin-top:22px">
-      <h2 style="font-size:15px;color:var(--accent-green);margin:0 0 6px">Shortcuts (/ commands)</h2>
+    <div id="shortcuts" class="card" style="margin-top:22px">
+      <h2>Shortcuts (/ commands)</h2>
       <p style="font-size:12px;color:var(--text-secondary);margin:0 0 10px">
         Type <b>/</b> in the side panel to run these. Each shortcut is a reusable prompt with an optional start page and model.
       </p>
@@ -496,10 +585,11 @@
     </div>
 
     <div class="card" style="margin-top:22px">
-      <h2 style="font-size:15px;color:var(--accent-green);margin:0 0 6px">Saved workflows (Teach)</h2>
+      <h2>Saved workflows (Teach)</h2>
       <p style="font-size:12px;color:var(--text-secondary);margin:0 0 10px">
         Workflows you recorded with the 🎬 button. Run them from the side panel
-        (+ → Run a saved workflow). Manage and delete them here.
+        (+ → Run a saved workflow). Manage and delete them here. Rows marked DEMO are two
+        sample workflows that run on the fictional demo pages at ai.nowidevops.com/demo.
       </p>
       <div id="workflowList" style="font-size:12px"></div>
       <div class="actions" style="margin-top:12px">
@@ -510,5 +600,6 @@
   </div>
 
   <script src="options.js" type="module"></script>
+  <script src="settings-nav.js" type="module"></script>
 </body>
 </html>

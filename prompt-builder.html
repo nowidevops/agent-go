@@ -1,7 +1,8 @@
 <!doctype html>
-<html>
+<html lang="en" data-product="go">
 <head>
   <meta charset="utf-8" />
+  <script src="theme-boot.js"></script>
   <title>Prompt Builder — Agent Go</title>
   <!-- Standalone (detached-window) Prompt Builder. Same element IDs as the
        side-panel modal, driven by the SAME prompt-builder-ui.js — it detects
@@ -37,6 +38,7 @@
     .note { color: var(--text-secondary); }
     @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
   </style>
+  <link rel="stylesheet" href="theme.css" />
 </head>
 <body>
   <div class="head">
@@ -89,6 +91,7 @@
     <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
       <button class="btn-secondary" id="pbAttach" title="Attach images (vision-described) or text files (content quoted) as extra context — max 5">📎 Attach files</button>
       <span class="note" style="font-size:11px">images vision-described · text quoted · max 5</span>
+      <span class="note" style="font-size:11px;color:var(--accent-green, #4EC9B0)" title="Generating a prompt is free and capped at 20 an hour. Each attached image is described first and costs the vision rate.">✓ Generate is free · images cost the vision rate</span>
       <span id="pbVision" class="pb-model" hidden></span>
     </div>
     <div id="pbFiles" style="display:flex;flex-wrap:wrap;gap:5px;margin-top:4px"></div>

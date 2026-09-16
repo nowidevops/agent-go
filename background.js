@@ -2,8 +2,8 @@
 // Author: iDevOpsLLC
 
 import { SYSTEM_PROMPT } from "./config.js";
-import { getSettings, getCloudCreds, getSubmitEnabled, getByok, MAX_SUBAGENT_CONCURRENCY, DEFAULTS } from "./settings.js";
-import { TOOLS, executeTool, validateArgs, waitForLoad, DESKTOP_TOOL_NAMES, DESKTOP_ACTION_TOOL_NAMES } from "./tools.js";
+import { getSettings, getCloudCreds, getSubmitEnabled, getLiveSubmitEnabled, getByok, MAX_SUBAGENT_CONCURRENCY, DEFAULTS } from "./settings.js";
+import { TOOLS, executeTool, validateArgs, waitForLoad, loadBudgetMsFor, DESKTOP_TOOL_NAMES, DESKTOP_ACTION_TOOL_NAMES } from "./tools.js";
 import { chatStream, activeProvider } from "./provider.js";
 import { withModelLock } from "./model-lock.js";
 import { runPooled, acquireKeyedSlot } from "./concurrency.js";
@@ -13,14 +13,15 @@ import { needsServiceNowPack, buildServiceNowPack, packSource, isServiceNowUrl }
 import { LEGACY_WORKFLOW_PACK, needsWfPack, wfPackSource } from "./legacy-workflow-pack.js";
 import { snTestRecordOf, snTestRecordGate, snNoteWrite, snUnmentionedCreates, emitSnWriteAudit } from "./sn-ledger.js";
 import { WORKFLOW_STUDIO_PACK, needsWfsPack, wfsPackSource } from "./workflow-studio-pack.js";
-import { isSnExcludedUrl, forgetAclDenials } from "./sn-tools.js";
+import { isSnExcludedUrl, forgetAclDenials, getSnConnections } from "./sn-tools.js";
 import { buildFablePack, fablePackSource } from "./fable-pack.js";
 import { buildImplementationPhasesPack, implementationPhasesPackSource } from "./implementation-phases-pack.js";
 import { seedDefaultShortcuts } from "./shortcuts.js";
 import { buildTradingPack, tradingPackSource, needsTradingPack, tradingModeLabel } from "./trading-pack.js";
 import { buildScalpingPack, scalpingPackSource } from "./scalping-pack.js";
+import { buildLiveTradingPack, liveTradingPackSource, needsLiveTradingPack, liveTradingModeLabel, buildLiveScalpingPack, liveScalpingPackSource } from "./live-trading-pack.js"; // REAL-MONEY pack (2026-09-11), separate from the paper pack
 import { buildM1Pack, m1PackSource, needsM1Pack, isM1DashboardUrl, isM1ReadOnlyRoute } from "./m1-pack.js";
-import { teachStart, teachStop, recordEvent, getWorkflows, deleteWorkflow } from "./teach.js";
+import { teachStart, teachStop, recordEvent, getWorkflows, deleteWorkflow, seedDemoWorkflows } from "./teach.js";
 import { logErr } from "./util.js";
 import { saveRunState, loadRunState, clearRunState, peekResumable, loadPhaseState, clearPhaseState } from "./run-state.js";
 import { syncAlarms, handleAlarm, drainPending, resetForAccountChange } from "./scheduler.js";
@@ -32,12 +33,18 @@ import { recordEvidence, buildCiteTokens } from "./phase-parsers.js";
 import { RCA_PACK, needsRcaPack } from "./rca-pack.js";
 import { buildPromptWriterMessages } from "./prompt-builder.js";
 import { extractTextToolCalls } from "./tool-call-parse.js";
+import { repeatRefusal, looksTruncated, isNonContinuation, capToolPayload, TOOL_RESULT_MAX_CHARS, applyGroundingGuard, isEchoOfPrevious, callSignature, groundingScan, groundedWorkNudge, SN_RECORD_RX } from "./loop-guards.js";
 import { RESEARCH_PACK, needsResearchPack } from "./research-pack.js";
 import { SN_CODEREVIEW_PACK, needsSnCodeReviewPack } from "./servicenow-codereview-pack.js";
 import { SN_INCIDENT_RESOLUTION_PACK, needsSnIncidentResolutionPack } from "./servicenow-incident-resolution-pack.js";
 import { SN_RCA_PACK, needsSnRcaPack } from "./servicenow-rca-pack.js";
 import { SN_POSTDEPLOY_PACK, needsSnPostDeployPack, postDeployProdTarget } from "./servicenow-postdeploy-pack.js";
 import { TEAMS_PACK, needsTeamsPack, teamsPackSource } from "./teams-pack.js";
+import { KB_ARTICLE_PACK, needsKbArticlePack } from "./kb-article-pack.js";
+import { INBOX_PACK, needsInboxPack, inboxPackSource } from "./inbox-pack.js";
+import { MEETING_FOLLOWUP_PACK, needsMeetingFollowupPack } from "./meeting-followup-pack.js";
+import { CONTRACT_REVIEW_PACK, needsContractReviewPack } from "./contract-review-pack.js";
+import { RFP_PACK, needsRfpPack } from "./rfp-pack.js";
 import { SLACK_PACK, needsSlackPack, slackPackSource } from "./slack-pack.js";
 import { UNSLOP_PACK, unslopPackSource } from "./unslop-pack.js";
 import { initNetLog } from "./diagnostics.js";
@@ -49,7 +56,7 @@ initNetLog();
 // Build marker — bump on each change so you can confirm in the service-worker
 // console (chrome://extensions → "service worker") that a reload actually picked
 // up the new code. If you don't see this line after reloading, the worker is stale.
-const BUILD_TAG = "AGENT GO 0.2.6 — open-source release";
+const BUILD_TAG = "AGENT GO 0.2.22 — open-source release";
 console.log("[Local LLM] background.js loaded — build " + BUILD_TAG);
 
 // Race a promise against the run's AbortSignal so a hung awaited operation can be
@@ -77,17 +84,22 @@ function abortableRace(promise, signal) {
 // Open the side panel when the toolbar icon is clicked. Also (re)build the
 // schedule alarms — on install AND on every browser start, since chrome.alarms
 // must be re-derived from the current shortcuts after a restart.
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener((details) => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+  // First-run setup page (welcome.html), fresh installs only: never on update or reload.
+  if (details && details.reason === "install") chrome.tabs.create({ url: chrome.runtime.getURL("welcome.html") }).catch(() => {});
   // Seed the ServiceNow use-case slash commands (idempotent, versioned) BEFORE
   // alarm sync — none carry schedules today, but keep the ordering safe.
   seedShortcuts().catch((e) => logErr("seedShortcuts on install failed", e))
     .then(() => syncAlarms()).catch((e) => logErr("syncAlarms on install failed", e));
   seedDefaultShortcuts().catch(() => {}); // one-time UAT starter /command shortcuts (flag-guarded)
   getSettings().then((s) => scheduleUpdateChecks(s.backendUrl)).catch(() => {}); // "new pack available" (daily)
+  // Demo workflows (teach.js seedDemoWorkflows): users get them once per version; the key-less dev copy always.
+  seedDemoWorkflows().catch((e) => logErr("seedDemoWorkflows on install failed", e));
 });
 chrome.runtime.onStartup?.addListener(() => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+  seedDemoWorkflows().catch((e) => logErr("seedDemoWorkflows on startup failed", e)); // no-op unless something is missing
   seedShortcuts().catch((e) => logErr("seedShortcuts on startup failed", e))
     .then(() => syncAlarms()).catch((e) => logErr("syncAlarms on startup failed", e));
   flagInterruptedPhaseRun().catch(() => {});
@@ -127,6 +139,8 @@ flagInterruptedPhaseRun().catch(() => {});
 // Same eviction gap for the seeded slash commands: version-gated no-op after
 // the first successful run, so this is one cheap storage read per cold start.
 seedShortcuts().catch(() => {});
+// Demo workflows too, so a zip reloaded with only the side panel open gets them (Master-Mind 6aa7700c B7). No-op when present.
+seedDemoWorkflows().catch(() => {});
 // Declared here (not next to withRunKeepalive) so the cold-start sweep below is
 // not reading a `const` that is still in its temporal dead zone.
 const KEEPALIVE_ALARM_PREFIX = "run-keepalive:";
@@ -392,7 +406,7 @@ function fittedOllamaOptions(settings, messages, tools, post) {
     est = estimatePromptTokens(messages, tools);
     if (n && post) { try { post({ type: "tool_result", name: "context_compact", result: { ok: true, compacted: n, est_tokens: est, num_ctx: numCtx, note: "Older tool results were shortened client-side so the prompt fits the context window (prevents Ollama dropping the task turn)." } }); } catch {} }
   }
-  // CONTEXT OVERFLOW STREAK (incident 2026-08-18, local-claude-20260818-115018): the
+  // CONTEXT OVERFLOW STREAK (the 2026-08-18 context-overflow incident): the
   // compactor cannot shrink below system + task + tool schemas + the last 2 turns.
   // Once est_tokens sits ABOVE num_ctx even after compaction, Ollama trims the HEAD
   // of the prompt server-side (system prompt / task / review method), the model
@@ -453,7 +467,7 @@ function currentDateLine() {
 
 // Tools that CHANGE things (click, type, navigate, edit code). In "ask before
 // acting" mode these require user approval; read-only tools never do.
-const ACTION_TOOLS = new Set(["click_element", "fill_input", "press_key", "send_chat_message", "draft_chat_message", "delete_chat_message", "select_option", "drag_drop", "control_media", "open_form_section", "save_record", "set_reference_field", "sn_set_field", "navigate", "set_editor_value", "close_tab", "send_sms", "send_email", "write_file", "create_document", "create_folder", "move_file", "copy_file", "delete_file", "edit_file", "run_command", "http_request", "sn_update_record", "sn_create_record", "sn_wf_activity_set", "sn_wf_delete_activity", "sn_wf_fix_script", "sn_wf_publish", "sn_login", "set_session_max_loss",
+const ACTION_TOOLS = new Set(["create_shortcut", "click_element", "fill_input", "press_key", "send_chat_message", "draft_chat_message", "delete_chat_message", "select_option", "drag_drop", "control_media", "open_form_section", "save_record", "set_reference_field", "sn_set_field", "navigate", "set_editor_value", "close_tab", "send_sms", "send_email", "write_file", "create_document", "create_folder", "move_file", "copy_file", "delete_file", "edit_file", "run_command", "http_request", "sn_update_record", "sn_create_record", "sn_wf_activity_set", "sn_wf_delete_activity", "sn_wf_fix_script", "sn_wf_publish", "sn_login", "set_session_max_loss",
   // Desktop control that CHANGES OS state (mouse/keyboard) — approval-gated in
   // "ask" mode, and stripped in read-only mode. The read-only desktop tools
   // (screenshot, get_screen_size) are deliberately NOT here.
@@ -471,6 +485,7 @@ const ACTION_TOOLS = new Set(["click_element", "fill_input", "press_key", "send_
 // verbatim, to Alex) with no review — the user now wants every outgoing chat
 // message shown for approval first. draft_chat_message stays un-gated (never sends).
 const ALWAYS_CONFIRM_TOOLS = new Set(["send_chat_message", "delete_chat_message", "send_sms", "send_email", "write_file", "create_document", "delete_file", "edit_file", "run_command",
+  ...DESKTOP_ACTION_TOOL_NAMES, // MM 6aa484e7 P2: an OS-level click/type always gets a look first
   // sn_wf_delete_activity (2026-09-02) removes workflow records on the instance — deletion always gets a look first.
   "sn_wf_delete_activity"]);
 
@@ -486,6 +501,8 @@ const APPROVAL_EXEMPT_TOOLS = new Set(["sn_login"]);
 // "helpfully" edit and save things. Read tools (read_page, query_elements,
 // scroll, the MCP query/fetch tools, web_search, etc.) remain.
 const READ_ONLY_TOOLS = TOOLS.filter((t) => !ACTION_TOOLS.has(t.function && t.function.name));
+// 09j: what the model is told when read-only strips the action tools.
+const READ_ONLY_MODE_NOTE = "\n\nREAD-ONLY MODE is on for this run. The tools that click, type, navigate, or write files and records are NOT in your tool list. If the request needs one of them, say so in ONE sentence (\"Read-only mode is on, so I will not click that\") and offer what you can read instead. Do not write a numbered plan of actions you cannot take, and do not describe the click as done.";
 
 // INSTANCE READ-ONLY ACCESS (standing owner grant 2026-08-20): fact-finding,
 // story-requirements-verification, and research tasks have pre-approved READ
@@ -506,6 +523,24 @@ const SN_RESEARCH_TASK_RE = /\b(fact[\s-]?find(?:ing)?|(?:story\s+)?requ[ie]reme
 // allowed (nothing persists without save_record); sn_login stays allowed (it's
 // how read access is obtained). http_request is handled separately in the guard
 // (non-GET to the granted host only).
+// 09k: the sn_* schemas (20 tools, ~8k tokens) ride along only when ServiceNow is in play.
+// Relevance = an instance connected in Settings, a service-now.com tab open, or the request
+// naming ServiceNow / a record number. Anything else keeps the prompt ~8k tokens smaller, which
+// is the difference between fitting 32k and the autofit raising num_ctx past what a 24 GB card
+// holds (v2 take 1: qwen3-coder:30b at 45k ctx ran prompt eval at 166 tok/s instead of 5,146).
+// The executor still runs an sn_* call the model makes by name; nothing is refused here.
+const SN_TOOL_NAMES = new Set(TOOLS.map((t) => t.function && t.function.name).filter((n) => /^sn_/.test(n || "")));
+const SN_TASK_RX = /service-?now|\.service-now\.com|\bsn_[a-z_]+\b|\b(?:business rule|script include|client script|ui action|update set|catalog item|flow designer|glide(?:record|ajax|system))\b/i;
+async function snToolsRelevant(taskText) {
+  try {
+    const t = String(taskText || "");
+    if (SN_TASK_RX.test(t) || SN_RECORD_RX.test(t)) return true;
+    if ((await getSnConnections()).length) return true;
+    const tabs = await chrome.tabs.query({});
+    return tabs.some((tab) => isServiceNowUrl(String(tab.url || "")));
+  } catch { return true; } // any doubt: keep the tools (the old behaviour)
+}
+function withoutSnTools(list) { return list.filter((t) => !SN_TOOL_NAMES.has(t.function && t.function.name)); }
 const SN_INSTANCE_WRITE_TOOLS = new Set(["save_record", "sn_set_field", "sn_update_record", "sn_create_record", "sn_wf_activity_set", "sn_wf_delete_activity", "sn_wf_fix_script", "sn_wf_publish", "set_editor_value"]);
 
 // M1 FINANCE allowlist (fail-CLOSED): on a real-money 401(k), READ_ONLY_TOOLS
@@ -584,14 +619,192 @@ function webSourceAudit(steps) {
   const searches = [], pages = [];
   for (const s of steps || []) {
     try {
-      const a = JSON.parse(s.args || "{}");
+      let a = {};
+      try { a = JSON.parse(s.args || "{}"); } catch { a = {}; } // a 160-char redaction can be cut mid-JSON (N-11)
       if ((s.tool === "web_search" || s.tool === "google_search") && a.query) searches.push(String(a.query).slice(0, 200));
-      else if ((s.tool === "navigate" || s.tool === "fetch_page") && !s.error && !s.denied && a.url) pages.push(String(a.url).slice(0, 300));
+      else if ((s.tool === "navigate" || s.tool === "fetch_page" || (s.tool === "read_page" && (s.url || a.url))) && !s.error && !s.denied && (s.url || a.url)) pages.push(String(s.url || a.url).slice(0, 300));
     } catch {}
   }
   const uniq = (a) => [...new Set(a)];
   return { searches: uniq(searches), pages: uniq(pages) };
 }
+// GROUNDING GUARD wiring (2026-09-09; ledger rebuilt 2026-09-09c after the master-mind
+// NO-GO) — see loop-guards.js for why this is code and not a prompt rule. The ledger is
+// built from the run's own step list, so the check is against what the tools actually
+// did, never against what the answer says they did.
+//
+// 09b counted ONLY write_file / create_document / create_folder as "writes". A run that
+// updated a ServiceNow record and said "the incident was updated successfully" was then
+// branded "NOTHING WAS WRITTEN — nothing reached disk" and sent back with "do not call
+// any sn_* tool" (MM 2026-09-09 F1/F2). Every state change the run made is in the
+// ledger now, and the claim is ROUTED on its shape (file / record / other mutation).
+// Tools whose success CHANGES something that is not a local file.
+const MUTATING_LEDGER_TOOLS = new Set([...SN_INSTANCE_WRITE_TOOLS,
+  "create_folder", "delete_file", "fill_input", "click_element", "press_key", "select_option", "drag_drop",
+  "set_reference_field", "open_form_section", "send_email", "send_sms", "send_chat_message", "draft_chat_message",
+  "delete_chat_message", "save_note", "create_shortcut", "submit_paper_order", "control_media"]);
+// Entries the loop itself pushes into `steps` (not model tool calls). GPT-6 Astra, MM 09-09:
+// counting these as tool calls let "zero trajectory entries" stand in for "zero tool calls".
+const SYNTHETIC_STEP_TOOLS = new Set(["step_cap_extended", "fable_behavior_pack", "context_overflow_abort"]);
+// WRITE RECEIPTS (2026-09-09d, MM pass 2 B-3). The only proof that a file was written in an
+// EARLIER run is a record this code made when the write tool returned ok — never the previous
+// answer's prose ("I saved x.md" used to vouch for x.md even when the same sentence said
+// another file was NOT written). Kept in chrome.storage.local for 72 h, newest 300 paths.
+const WRITE_RECEIPTS_KEY = "groundingWriteReceipts";
+const WRITE_RECEIPT_TTL_MS = 72 * 3600 * 1000;
+async function loadWriteReceipts() {
+  try {
+    const all = (await chrome.storage.local.get(WRITE_RECEIPTS_KEY))[WRITE_RECEIPTS_KEY];
+    const now = Date.now();
+    return (Array.isArray(all) ? all : []).filter((r) => r && r.p && (now - (r.t || 0)) < WRITE_RECEIPT_TTL_MS).map((r) => ({ p: String(r.p), root: String(r.root || "") }));
+  } catch { return []; }
+}
+// Receipts are {p, t, root}: the root the write landed in (from the tool result), so a
+// receipt from a folder that is no longer connected cannot vouch for a same-named file in
+// another one (MM pass 3, N-4). Updates are serialised — two un-awaited writes in one turn
+// used to race read-modify-write and could drop a receipt for later runs.
+let _receiptChain = Promise.resolve();
+function recordWriteReceipts(entries) {
+  const add = (entries || [])
+    .map((e) => (typeof e === "string" ? { p: e, root: "" } : e))
+    .filter((e) => e && String(e.p || "").trim())
+    .map((e) => ({ p: String(e.p).trim(), root: String(e.root || "") }));
+  if (!add.length) return _receiptChain;
+  _receiptChain = _receiptChain.then(async () => {
+    const now = Date.now();
+    const cur = (await chrome.storage.local.get(WRITE_RECEIPTS_KEY))[WRITE_RECEIPTS_KEY];
+    const same = (r, e) => String(r.p) === e.p && String(r.root || "") === e.root;
+    const kept = (Array.isArray(cur) ? cur : []).filter((r) => r && r.p && (now - (r.t || 0)) < WRITE_RECEIPT_TTL_MS && !add.some((e) => same(r, e)));
+    const next = kept.concat(add.map((e) => ({ p: e.p, t: now, root: e.root }))).slice(-300);
+    await chrome.storage.local.set({ [WRITE_RECEIPTS_KEY]: next });
+  }).catch(() => {});
+  return _receiptChain;
+}
+// Paths a successful file-writing step touched (write_file / create_document / edit_file; the
+// destination of move_file / copy_file). Shared by the ledger and the receipt recorder.
+function stepWrittenPaths(s) {
+  if (!s || !s.ok || s.error || s.denied) return [];
+  if (s.tool === "write_file" || s.tool === "create_document" || s.tool === "edit_file") { const q = fsArgPath(s); return q ? [q] : []; }
+  if (s.tool === "move_file" || s.tool === "copy_file") { const ft = fsArgFromTo(s); return ft && ft.to ? [ft.to] : []; }
+  return [];
+}
+// A url safe to keep in the local trajectory / checkpoint: no #fragment, token-like query
+// values masked (OAuth codes, session tokens, g_ck), 300 chars (MM pass 4, follow-up 10).
+function persistableUrl(u) {
+  let s = String(u || "");
+  try {
+    const U = new URL(s);
+    U.hash = "";
+    for (const k of [...U.searchParams.keys()]) {
+      if (/^(?:code|id_token|access_token|refresh_token|token|state|password|passwd|session|sessionid|sysparm_ck|g_ck|api[_-]?key|secret|sig|signature)$/i.test(k)) U.searchParams.set(k, "***");
+    }
+    s = U.toString();
+  } catch {}
+  return s.slice(0, 300);
+}
+function realToolSteps(steps) { return (steps || []).filter((s) => s && s.tool && !SYNTHETIC_STEP_TOOLS.has(s.tool)); }
+function groundingLedger(steps, ctx) {
+  const fs = fsSourceAudit(steps);
+  const real = realToolSteps(steps);
+  const writes = [], mutations = [];
+  for (const s of real) {
+    if (!s.ok || s.error || s.denied) continue;
+    const wrote = stepWrittenPaths(s);
+    if (wrote.length) { writes.push(...wrote); }
+    else if (s.tool === "write_file" || s.tool === "create_document" || s.tool === "edit_file" || s.tool === "move_file" || s.tool === "copy_file") { writes.push(s.tool); }
+    else if (s.tool === "http_request") {
+      // The method is recorded on the step at push time (MM pass 2 B-9): redactArgs keeps
+      // only 160 chars of the args, so a long url could hide it from a text sniff.
+      const m = String(s.method || "").toUpperCase() || ((/"method"\s*:\s*"([a-z]+)"/i.exec(String(s.args || "")) || [])[1] || "GET").toUpperCase();
+      if (m !== "GET" && m !== "HEAD") mutations.push(s.tool);
+    }
+    else if (MUTATING_LEDGER_TOOLS.has(s.tool)) mutations.push(s.tool);
+  }
+  const pageReads = real.filter((s) => (s.tool === "read_page" || s.tool === "fetch_page" || s.tool === "read_pdf") && s.ok && !s.error).length;
+  const snContext = real.some((s) => /^sn_/.test(s.tool || "") || SN_INSTANCE_WRITE_TOOLS.has(s.tool))
+    || !!(ctx && ctx.snInstance) || !!(ctx && ctx.snInstanceReadOnly)
+    || /service-?now|\.service-now\.com/i.test(String((ctx && ctx.taskText) || "")) || SN_RECORD_RX.test(String((ctx && ctx.taskText) || ""));
+  const uniq = (a) => [...new Set(a)];
+  return {
+    writes: uniq(writes), reads: fs.reads, pageReads: pageReads ? [pageReads] : [],
+    toolCalls: real.length, mutations: uniq(mutations), snContext,
+    receipts: (ctx && Array.isArray(ctx.writeReceipts)) ? ctx.writeReceipts : [], // earlier runs' verified writes (B-3)
+    roots: (() => { // the folders connected NOW, so a receipt from a disconnected root cannot vouch (N-4)
+      const fi = ctx && ctx.fsInfo; if (!fi) return [];
+      const rs = Array.isArray(fi.roots) && fi.roots.length ? fi.roots : (fi.root ? [{ name: fi.root }] : []);
+      return rs.filter((r) => r && !r.needsReconnect).map((r) => String(r.name || r.root || "")).filter(Boolean);
+    })(),
+    prevAssistantText: (ctx && ctx.prevAssistantText) || "", executePlan: !!(ctx && ctx.executePlan),
+    taskText: String((ctx && ctx.taskText) || "") // 09j: the retry nudge is shaped by the request
+  };
+}
+// An approved plan that needs no tool (pure drafting) is legitimately executed with zero
+// calls; the not-executed banner is for plans that named calls and then made none.
+function planNeedsTools(planText) {
+  const t = String(planText || "");
+  if (!t.trim()) return true; // no plan text to judge — keep the guard
+  if (TOOLS.some((d) => d.function && d.function.name && t.includes(d.function.name))) return true;
+  if (/\bhttps?:\/\/\S+/i.test(t) || /(?:[\w.-]+[\\/])+[\w.-]+\.[a-z0-9]{1,5}\b/i.test(t)) return true;
+  return /\b(?:read|open|write|save|create|update|edit|append|navigate|search|query|fetch|click|fill|download|upload)\b/i.test(t);
+}
+function runGroundingGuard(text, steps, ctx, post) {
+  const isChild = !!(ctx && ctx.isChild), embedded = !!(ctx && ctx.embedded);
+  // A definitional answer ("a Business Rule runs when a record is updated") needs no tool
+  // and must not be banner-flagged — same exemption the retry already had (MM 09-09 F6).
+  if (ctx && isConceptualTurn(ctx.taskText || "")) return text;
+  const ledger = groundingLedger(steps, ctx);
+  const g = applyGroundingGuard(text, ledger);
+  let out = text;
+  if (g.violation) {
+    post({ type: "tool", name: "grounding_violation", args: { kind: g.violation.kind } });
+    post({ type: "tool_result", name: "grounding_violation", result: {
+      ok: false, blocked: true, kind: g.violation.kind,
+      claimed_paths: g.violation.paths && g.violation.paths.length ? g.violation.paths : undefined,
+      files_actually_written: ledger.writes,
+      other_changes_made: ledger.mutations.length ? ledger.mutations : undefined,
+      tool_calls_this_run: ledger.toolCalls,
+      note: g.violation.kind === "writes"
+        ? (ledger.writes.length
+            ? "The answer reported files as written that this run has no write evidence for (the run did write: " + ledger.writes.join(", ") + "). A correction banner was prepended."
+            : "The answer reported files as written while the run made no successful file write. A correction banner was prepended. The files were not saved.")
+        : "The answer described pages or files while the run made no tool call at all. A correction banner was prepended. None of that content was read."
+    } });
+    // A child's text is the PARENT's input and an embedded draft goes to the REVIEW gate:
+    // neither gets the reader-facing banner (it would pollute the parent's context and
+    // force a spurious NO-GO). They get one machine-readable line instead (MM 09-09 F6).
+    out = (isChild || embedded)
+      ? "[GROUNDING: " + (g.violation.kind === "writes"
+          ? "this agent reported files as written that no tool wrote"
+          : "this agent described pages or files with no tool call behind them") + " — treat that part as UNVERIFIED]\n" + text
+      : g.text;
+  }
+  if (isChild || embedded) return out;
+  // ECHO: a final answer that repeats the previous one verbatim is not a reply.
+  if (ctx && ctx.prevAssistantText && isEchoOfPrevious(text, ctx.prevAssistantText)) {
+    post({ type: "tool", name: "echo_violation", args: { chars: String(text || "").length } });
+    post({ type: "tool_result", name: "echo_violation", result: {
+      ok: false, blocked: true,
+      note: "This answer repeats the previous answer. The model re-emitted its last turn instead of acting on the new request."
+    } });
+    out = "⚠️ **THIS REPEATS THE PREVIOUS ANSWER**\n\n" +
+      "The model replied with its own last message instead of acting on what you just asked. " +
+      "Nothing new was done. Send the request again, or start a fresh chat if it repeats.\n\n---\n\n" + out;
+  }
+  // EXECUTE THAT DID NOT EXECUTE: an approved plan that called for tools, and a run that
+  // made no real tool call at all.
+  if (ctx && ctx.executePlan && ledger.toolCalls === 0 && planNeedsTools(ctx.prevAssistantText)) {
+    post({ type: "tool", name: "plan_not_executed", args: { steps: 0 } });
+    post({ type: "tool_result", name: "plan_not_executed", result: {
+      ok: false, blocked: true,
+      note: "You approved a plan and the run made ZERO tool calls — the plan was not executed."
+    } });
+    out = "⚠️ **THE APPROVED PLAN WAS NOT EXECUTED**\n\n" +
+      "This run made no tool calls, so none of the plan's steps ran and nothing was changed. " +
+      "The text below is what the model wrote, not what it did.\n\n---\n\n" + out;
+  }
+  return out;
+}
+
 function emitWebAudit(steps, post) {
   const a = webSourceAudit(steps);
   if (!a.searches.length) return a; // no research happened — stay quiet
@@ -632,30 +845,8 @@ async function getActMode() {
   }
 }
 
-// TRUNCATION DETECTOR (2026-09-03). Cheap, conservative: only a LONG answer can be judged
-// cut off, and only on strong signs — an open code fence, a dangling table row / list item /
-// heading, no closing punctuation on the last line, or a lettered section the request asked
-// for that the answer never reached. Returns the reason, or "" when the answer looks complete.
-function looksTruncated(text, taskText) {
-  const t = String(text || "").replace(/\s+$/, "");
-  if (t.length < 1200) return "";
-  const fences = (t.match(/```/g) || []).length;
-  if (fences % 2 === 1) return "an unclosed code block";
-  const last = (t.split("\n").filter((l) => l.trim()).pop() || "").trim();
-  if (/^#{1,6}\s+\S/.test(last)) return "it ends on a heading with nothing under it";
-  if (/^\|/.test(last) && !/\|\s*$/.test(last)) return "it ends inside a table row";
-  if (/^([-*+]|\d+[.)])\s*$/.test(last)) return "it ends on an empty list marker";
-  if (/[,;:(\[{/—–-]$/.test(last) || /\b(and|or|the|a|an|to|of|with|for|in|on|at|by|via|then|check|open|set|see)$/i.test(last)) return "the last line stops mid-sentence";
-  // Lettered sections the request enumerated ("A. …", "B. …") that the answer never reached.
-  const asked = Array.from(new Set((String(taskText || "").match(/^\s*([A-Z])\.\s+[A-Z]/gm) || []).map((m) => m.trim()[0])));
-  if (asked.length >= 3) {
-    const have = new Set((t.match(/^\s*(?:#+\s*)?([A-Z])[.)]\s+\S/gm) || []).map((m) => m.trim().replace(/^#+\s*/, "")[0]));
-    const missing = asked.filter((l) => !have.has(l));
-    if (missing.length && missing.length < asked.length) return "sections " + missing.join(", ") + " of the request are missing";
-  }
-  if (/\b(checklist)\b/i.test(String(taskText || "")) && !/checklist/i.test(t)) return "the requested checklist is missing";
-  return "";
-}
+// looksTruncated / isNonContinuation live in loop-guards.js (2026-09-08a) so the
+// truncation contract is unit-testable: node shortcut-tool.test.mjs
 
 // Run one user turn: stream tokens, execute tools, loop until a final answer.
 // `attachments` (optional): array of { base64, name } images the user queued.
@@ -692,6 +883,8 @@ async function runAgent(history, post, signal, attachments, askApproval, modelOv
   // Autonomous-submit kill-switch (Phase 4) — local, default OFF; gates the
   // trading pack's SUBMIT mode + the Submit-button tool guard.
   settings.paperOrderSubmissionEnabled = await getSubmitEnabled();
+  // REAL-MONEY kill-switch (storage.local, default OFF) — gates the live pack's SUBMIT mode + the live Submit-button guard.
+  settings.liveOrderSubmissionEnabled = await getLiveSubmitEnabled();
 
   // Resolve the run model. A shortcut/scheduled task may override it. A CLOUD
   // override is encoded "provider:modelId" (e.g. "anthropic:claude-haiku-4-5")
@@ -818,7 +1011,7 @@ async function runAgent(history, post, signal, attachments, askApproval, modelOv
     const _multi = _roots.length > 1;
     const _names = _roots.map((r) => `"${r.name}"`).join(", ");
     const _openLine = _multi
-      ? `\n\nCONNECTED LOCAL FOLDERS (Filesystem MCP — ground truth): ${_roots.length} local folders are connected — ${_roots.map((r) => `"${r.name}" (read${r.canWrite ? "/write" : "-only"})`).join(", ")}. The \`list_files\`/\`read_file\` (and organize/write) tools work across ALL of them, but a path must say WHICH folder: PREFIX it with the folder NAME — e.g. read_file "${_roots[0].name}/README.md", list_files "${_roots[0].name}", search_files with path "${_roots[0].name}". A bare path with NO folder prefix is AMBIGUOUS and will error — always include the prefix. \`list_files\` with NO path lists the connected folder names. A Windows path in the task (e.g. <local path>) maps to the connected folder whose NAME is its last segment: write to "<FolderName>/file.md". `
+      ? `\n\nCONNECTED LOCAL FOLDERS (Filesystem MCP — ground truth): ${_roots.length} local folders are connected — ${_roots.map((r) => `"${r.name}" (read${r.canWrite ? "/write" : "-only"})`).join(", ")}. The \`list_files\`/\`read_file\` (and organize/write) tools work across ALL of them, but a path must say WHICH folder: PREFIX it with the folder NAME — e.g. read_file "${_roots[0].name}/README.md", list_files "${_roots[0].name}", search_files with path "${_roots[0].name}". A bare path with NO folder prefix is AMBIGUOUS and will error — always include the prefix. \`list_files\` with NO path lists the connected folder names. A Windows path in the task (e.g. C:\\redacted\\path) maps to the connected folder whose NAME is its last segment: write to "<FolderName>/file.md". `
       : `\n\nCONNECTED LOCAL FOLDER (Filesystem MCP — ground truth): a local folder named "${_roots[0].name}" is mounted read${_roots[0].canWrite ? "/write" : "-only"} and you can read it with the \`list_files\` and \`read_file\` tools (paths are RELATIVE to this root). `;
     systemPrompt += _lapsedLine + _openLine +
       `read_file handles MORE than text/code: PDFs, Word (.docx), Excel (.xlsx), PowerPoint (.pptx) and RTF files have their TEXT extracted, and images (.png/.jpg/...) are DESCRIBED via the vision model — so to summarize or answer about such a file, just read_file it. NEVER claim binary files in this folder are unreadable. ` +
@@ -842,9 +1035,9 @@ async function runAgent(history, post, signal, attachments, askApproval, modelOv
         ? ` You can RUN shell commands with \`run_command\` (npm/git/tests/builds${settings.projectDir ? `, cwd defaults to ${settings.projectDir}` : ""}) — after editing code, RUN the tests/build to VERIFY your change actually works before claiming done. Use git through run_command (git status/diff/add/commit).`
         : ``) +
       // TWO-FOLDER PRECISION (2026-07-22, live a-live-run: the model was asked
-      // "do you have access to <local path> Files" and vaguely claimed the connected
+      // "do you have access to C:\\redacted\\path" and vaguely claimed the connected
       // root WAS "your project folder" — but the file tools were mounted on SN_REF,
-      // while run_command's cwd was <local path> Files, a DIFFERENT folder). Teach the
+      // while run_command's cwd was C:\\redacted\\path). Teach the
       // model the two surfaces so it answers access questions accurately.
       `\n\nTWO SEPARATE FOLDER SURFACES — answer access questions PRECISELY, do not conflate them: the FILE tools (list_files, read_file, edit_file, write_file, search_files, move_file, create_folder, …) reach ONLY the connected Filesystem-MCP folder(s) ${_names}${_multi ? " (prefix the folder name)" : ""} — nothing else.` +
       (settings.commandExecEnabled && settings.projectDir
@@ -941,6 +1134,27 @@ async function runAgent(history, post, signal, attachments, askApproval, modelOv
     snPostDeployProdHost = postDeployProdTarget(taskText);
     post({ type: "tool", name: "servicenow_postdeployment_pack", args: { injected: true } });
     post({ type: "tool_result", name: "servicenow_postdeployment_pack", result: { ok: true, mode: "sn-post-deployment", track: snPostDeployProdHost ? "B — PRODUCTION target (read-only, enforced in code)" : "A — non-production target (validate + smoke test)", production_target: snPostDeployProdHost, method: "update-set manifest → commit state → preview problems → live-record parity → config + broken references → smoke test (non-prod only) → issues + GO/NO-GO → click-by-click" } });
+  } else if (needsKbArticlePack(taskText, tabUrl)) {
+    // Knowledge-worker packs (go-to-market brief 2026-09-04). Explicit article /
+    // SOP / contract / RFP / meeting shapes are more specific than review or
+    // incident phrasing, so they sit ahead of the ServiceNow method packs; the
+    // gate regexes require their own nouns, so "review this Business Rule" still
+    // reaches the code-review pack (knowledge-packs.test.mjs pins the precedence).
+    systemPrompt += "\n\n" + KB_ARTICLE_PACK;
+    post({ type: "tool", name: "kb_article_pack", args: { injected: true } });
+    post({ type: "tool_result", name: "kb_article_pack", result: { ok: true, mode: "kb-article-sop-writer", method: "source record/screens → scrub → structured draft → kb_knowledge (draft, approval-gated) or document" } });
+  } else if (needsContractReviewPack(taskText)) {
+    systemPrompt += "\n\n" + CONTRACT_REVIEW_PACK;
+    post({ type: "tool", name: "contract_review_pack", args: { injected: true } });
+    post({ type: "tool_result", name: "contract_review_pack", result: { ok: true, mode: "contract-playbook-review", method: "read whole contract → playbook or default checklist → clause table with citations → redlines → memo (read-only)" } });
+  } else if (needsRfpPack(taskText)) {
+    systemPrompt += "\n\n" + RFP_PACK;
+    post({ type: "tool", name: "rfp_response_pack", args: { injected: true } });
+    post({ type: "tool_result", name: "rfp_response_pack", result: { ok: true, mode: "rfp-response", method: "shred → requirements matrix → library evidence (fan-out ≤4) → cited answers → gap list → response document" } });
+  } else if (needsMeetingFollowupPack(taskText, tabUrl)) {
+    systemPrompt += "\n\n" + MEETING_FOLLOWUP_PACK;
+    post({ type: "tool", name: "meeting_followup_pack", args: { injected: true } });
+    post({ type: "tool_result", name: "meeting_followup_pack", result: { ok: true, mode: "meeting-follow-up", method: "read whole transcript → decisions/actions with quotes → draft follow-up (send gated by exact phrase)" } });
   } else if (needsSnCodeReviewPack(taskText, tabUrl)) {
     systemPrompt += "\n\n" + SN_CODEREVIEW_PACK;
     post({ type: "tool", name: "servicenow_codereview_pack", args: { injected: true } });
@@ -992,7 +1206,7 @@ async function runAgent(history, post, signal, attachments, askApproval, modelOv
   // Policy-excluded SN instance: say so UP FRONT every turn. The call-time sn_* error
   // alone doesn't persist across turns — the model re-tried excluded tools at the start
   // of each new user message (2026-07-09 session: 5 wasted calls). One line here ends that.
-  // (2026-08-02 INC1926570 run: the old blanket "do NOT call any sn_* tool" line
+  // (2026-08-02 INC0012345 run: the old blanket "do NOT call any sn_* tool" line
   // also banned the SESSION-based tools — sn_query_session / sn_check_duplicate /
   // sn_set_field — which run through the logged-in tab's g_ck token and need NO
   // credentials, so they work fine on excluded instances. The agent obeyed the
@@ -1070,8 +1284,11 @@ async function runAgent(history, post, signal, attachments, askApproval, modelOv
   // Trading pack — enabled AND trading-related AND NOT an M1 run (mutual exclusion).
   // Trigger on: active tab is day-trading, OR the task text is trading-related, OR any
   // OPEN tab is the day-trading page (a slim "run a cycle" trigger from another tab).
+  // REAL-MONEY page precedence (2026-09-11): when the ACTIVE tab is live-trading.html the PAPER pack is
+  // never injected (its any-open-tab / task-text triggers would otherwise put paper rules on a live form).
+  const liveTradingActive = needsLiveTradingPack(tabUrl);
   let tradingContext = false;
-  if (settings.tradingPackEnabled && !m1LocksRun && !isM1Origin) { // never run the trading pack on the real-money M1 origin (toggle-independent)
+  if (settings.tradingPackEnabled && !m1LocksRun && !isM1Origin && !liveTradingActive) { // never run the trading pack on the real-money M1 origin (toggle-independent) or on the live-trading page
     tradingContext = needsTradingPack(tabUrl);
     if (!tradingContext) {
       if (/\b(day[- ]?trad|trading pack|manual order|place (a |an )?(manual )?order|decision cycle)\b/i.test(taskText)) {
@@ -1118,6 +1335,47 @@ async function runAgent(history, post, signal, attachments, askApproval, modelOv
       post({ type: "tool_result", name: "scalping_overlay_pack", result: { ok: false, skipped: true, error: String(e.message || e) } });
     }
   }
+  // REAL-MONEY live-trading pack (2026-09-11) — ACTIVE-TAB gate ONLY (no task-text / open-tab
+  // trigger: real money needs the live page in front), opt-in toggle, never on an M1 run, and
+  // mutually exclusive with the paper pack above (liveTradingActive suppresses it).
+  let liveTradingPackInjected = false;
+  // REAL-MONEY section is ADMIN TIER ONLY (owner directive 2026-09-12): re-checked HERE at injection time, not only in Options.
+  let liveAdminOk = false;
+  if (settings.liveTradingPackEnabled && liveTradingActive) {
+    try { const { llmgo_auth: a } = await chrome.storage.local.get("llmgo_auth"); liveAdminOk = !!(a && a.idToken && a.tier === "admin"); } catch { liveAdminOk = false; }
+    if (!liveAdminOk) post({ type: "tool_result", name: "live_trading_agent_pack", result: { ok: false, skipped: true, error: "REAL-MONEY pack is admin-tier only — sign in with an admin account." } });
+  }
+  if (settings.liveTradingPackEnabled && liveTradingActive && liveAdminOk && !m1LocksRun && !isM1Origin) {
+    try {
+      const pack = await buildLiveTradingPack(settings);
+      systemPrompt += "\n\n" + pack;
+      liveTradingPackInjected = true;
+      const prov = activeProvider(settings);
+      post({ type: "tool", name: "live_trading_agent_pack", args: { injected: true, realMoney: true } });
+      post({ type: "tool_result", name: "live_trading_agent_pack", result: {
+        ok: true,
+        realMoney: true,
+        source: liveTradingPackSource(),
+        mode: liveTradingModeLabel(settings),
+        provider: prov,
+        model: prov === "ollama" ? settings.model : (settings.cloudModel || "(provider default)")
+      } });
+    } catch (e) {
+      logErr("Live trading pack injection skipped", e);
+      post({ type: "tool_result", name: "live_trading_agent_pack", result: { ok: false, skipped: true, error: String(e.message || e) } });
+    }
+  }
+  if (liveTradingPackInjected && settings.liveScalpingPackEnabled) {
+    try {
+      const pack = await buildLiveScalpingPack(settings);
+      systemPrompt += "\n\n" + pack;
+      post({ type: "tool", name: "live_scalping_overlay_pack", args: { injected: true, realMoney: true } });
+      post({ type: "tool_result", name: "live_scalping_overlay_pack", result: { ok: true, realMoney: true, source: liveScalpingPackSource(), mode: liveTradingModeLabel(settings) } });
+    } catch (e) {
+      logErr("Live scalping overlay injection skipped", e);
+      post({ type: "tool_result", name: "live_scalping_overlay_pack", result: { ok: false, skipped: true, error: String(e.message || e) } });
+    }
+  }
   // M1 Finance portfolio explorer pack — injected on the WHOLE dashboard.m1.com origin
   // (m1LocksRun), not just /portfolio, so the agent has the insight workflow on /d/home
   // and the concentration pages too (enforcement was already origin-wide; injection now
@@ -1145,6 +1403,34 @@ async function runAgent(history, post, signal, attachments, askApproval, modelOv
     } catch (e) {
       logErr("M1 pack injection skipped", e);
       post({ type: "tool_result", name: "m1_exploration_pack", result: { ok: false, skipped: true, error: String(e.message || e) } });
+    }
+  }
+
+  // Inbox triage + reply DRAFTER pack — URL-gated to Gmail / Outlook on the web
+  // + opt-in. Read, sort, draft into the reply composer; never send, archive,
+  // delete or label. The exact "APPROVED — SEND IT" phrase is the only send path,
+  // and the send_email / send_sms tools are blocked in code for this run unless
+  // the latest user message carries that phrase (ctx.inboxDrafter, per-call loop).
+  let inboxDrafter = false; // set below when the pack is in the prompt; agentLoop reads ctx.inboxDrafter (send gate)
+  if (settings.inboxPackEnabled && needsInboxPack(tabUrl)) {
+    try {
+      systemPrompt += "\n\n" + INBOX_PACK;
+      inboxDrafter = true;
+      const prov = activeProvider(settings);
+      post({ type: "tool", name: "inbox_drafter_pack", args: { injected: true } });
+      post({ type: "tool_result", name: "inbox_drafter_pack", result: {
+        ok: true,
+        source: inboxPackSource(),
+        mode: "READ-ONLY mailbox — triage + drafts into the reply composer; NEVER sends without exact 'APPROVED — SEND IT' phrase (send_email/send_sms blocked in code)",
+        provider: prov,
+        privacy: prov === "ollama"
+          ? "local model — email content stays on this machine"
+          : "CLOUD model selected — email content egresses to the provider; prefer a local model for private mail",
+        reason: "active Gmail / Outlook tab"
+      } });
+    } catch (e) {
+      logErr("Inbox pack injection skipped", e);
+      post({ type: "tool_result", name: "inbox_drafter_pack", result: { ok: false, skipped: true, error: String(e.message || e) } });
     }
   }
 
@@ -1237,10 +1523,57 @@ async function runAgent(history, post, signal, attachments, askApproval, modelOv
   // PLAN-FIRST: one planning turn with NO tools — the model drafts a numbered
   // plan and stops, the UI shows it for approval, and nothing is executed yet.
   if (opts.planFirst) {
+    // TOOL VISIBILITY DURING PLANNING (2026-09-09b; rebuilt 09c after the master-mind
+    // review). The planning turn runs with tools:[] so the model can only produce text. A
+    // local model reads that empty schema as a statement about its CAPABILITIES and writes
+    // the conclusion into the plan: "I will not be able to actually execute this plan
+    // because I don't have access to the file system tools" (export 16:47) — and on the
+    // approved execute turn, where the tools ARE present, it repeats that and calls
+    // nothing. So the planning prompt states the real toolset. 09c: the list is derived
+    // EXACTLY as agentLoop derives the execute turn's list (mode/M1 base, then the desktop
+    // and run_command opt-ins, then the instance read-only pin) so the plan can never be
+    // promised a tool the execute turn strips; lapsed (needsReconnect) folders are not
+    // advertised; file verbs are named only when present and the folder is writable; and
+    // the prohibition is scoped to the tools actually listed (MM 09-09 F4).
+    let planActMode = "auto";
+    try { planActMode = (await chrome.storage.local.get("actMode")).actMode || "auto"; } catch {}
+    const planM1 = !!(m1LocksRun || isM1Origin);
+    let planToolDefs = planM1 ? M1_SAFE_TOOLS_NAV : (planActMode === "readonly" ? READ_ONLY_TOOLS : TOOLS);
+    if (!settings.desktopControlEnabled) planToolDefs = planToolDefs.filter((t) => !DESKTOP_TOOL_NAMES.has(t.function && t.function.name));
+    if (!settings.commandExecEnabled) planToolDefs = planToolDefs.filter((t) => (t.function && t.function.name) !== "run_command");
+    if (!(await snToolsRelevant(taskText))) planToolDefs = withoutSnTools(planToolDefs); // 09k: same gate as the execute turn
+    const planToolNames = planToolDefs.map((t) => t.function && t.function.name).filter(Boolean);
+    const planHas = (n) => planToolNames.includes(n);
+    const planAllRoots = fsInfo
+      ? (Array.isArray(fsInfo.roots) && fsInfo.roots.length ? fsInfo.roots : [{ name: fsInfo.root, canWrite: fsInfo.canWrite }])
+      : [];
+    const planLiveRoots = planAllRoots.filter((r) => r && (r.name || r.root) && !r.needsReconnect);
+    const planRoots = planLiveRoots.map((r) => (r.name || r.root) + " (" + (r.canWrite ? "read/write" : "read-only") + ")");
+    // agentLoop's schema keeps the SN write tools on an instance-read-only run and REFUSES them
+    // at dispatch; the plan says exactly that instead of silently dropping them (MM pass 2 B-7).
+    const planSnRefused = snInstanceReadOnly ? planToolNames.filter((n) => SN_INSTANCE_WRITE_TOOLS.has(n)) : [];
+    const planCanWrite = planLiveRoots.some((r) => r.canWrite) && planHas("write_file");
+    const planFileVerbs = ["list_files", "read_file", "write_file", "edit_file", "create_folder"]
+      .filter((n) => planHas(n) && (planCanWrite || n === "list_files" || n === "read_file"));
+    const capabilityNote =
+      "\n\nYOUR TOOLS ON THE NEXT TURN — the same list the execute turn is given: " + planToolNames.join(", ") + "." +
+      (planSnRefused.length
+        ? " This run is pinned READ-ONLY on the instance " + snInstanceReadOnly + ": " + planSnRefused.join(", ") + " are in the list but will be REFUSED — do not plan them."
+        : "") +
+      (planRoots.length && planFileVerbs.length
+        ? " A local folder is CONNECTED and mounted right now: " + planRoots.join(", ") + ". " +
+          planFileVerbs.join(", ") + " work on it — paths are relative to that folder."
+        : "") +
+      (planActMode === "readonly" && !planM1 ? " READ-ONLY mode is on: plan reading and analysis only — no page actions, no file or record writes, no navigation." : "") +
+      (planM1 ? " M1 real-money pin: only the read-only M1 tools listed above." : "") +
+      " Tools are withheld from THIS message only so the plan arrives as text." +
+      " Do NOT write that you lack a tool that is listed above, or that a listed folder is not connected — that is false and it stops the work from happening." +
+      " A tool that is NOT listed above is genuinely unavailable this run; if the request needs one, say which step it blocks. Plan the real calls by name, then stop.";
     const planMessages = messages.concat({
       role: "user",
       content:
-        "PLANNING MODE: Before doing anything, write a concise numbered PLAN of the tool steps you will take to accomplish my request. Do NOT call any tools or take any action yet — output only the plan, then stop. I will approve or adjust it."
+        "PLANNING MODE: Before doing anything, write a concise numbered PLAN of the tool steps you will take to accomplish my request. Do NOT call any tools or take any action yet — output only the plan, then stop. I will approve or adjust it." +
+        capabilityNote
     });
     post({ type: "assistant_start" });
     let planText = "";
@@ -1313,6 +1646,12 @@ async function runAgent(history, post, signal, attachments, askApproval, modelOv
   // read-only even with m1PackEnabled=false.
   const m1ReadOnly = m1LocksRun || isM1Origin;
   if (m1ReadOnly) readOnly = true;
+  // 09j: the tools are stripped in read-only mode but the model was never TOLD, so it
+  // answered an action request with a plan of tool calls it could not make (v2 take 3)
+  // or a paragraph of alternatives (take 2). One line in the system message fixes both.
+  if (readOnly && !m1ReadOnly && messages[0] && messages[0].role === "system") {
+    messages[0] = { ...messages[0], content: messages[0].content + READ_ONLY_MODE_NOTE };
+  }
   // NOTE: the num_ctx FLOOR that prevents the local "stuck forever" overflow hang lives
   // in agentLoop() (not here), so it applies to BOTH a fresh run AND a resumed run after
   // MV3 worker eviction — a resumed M1 run would otherwise revert to the stale saved
@@ -1332,9 +1671,21 @@ async function runAgent(history, post, signal, attachments, askApproval, modelOv
     readOnly,
     snInstanceReadOnly, // instance-scoped read-only pin (fact-finding/verification/research standing grant) — host string or null
     m1ReadOnly, // pins the stricter M1 allowlist guard in agentLoop
+    inboxDrafter, // inbox pack in the prompt: send_email/send_sms blocked unless the latest user message carries the exact approval phrase
     tradingPackInjected, // precise num_ctx-floor gate: pack ACTUALLY in the prompt, not just the global toggle
+    liveTradingPackInjected, // REAL-MONEY pack in the prompt (2026-09-11): same trading-run gates (num_ctx floor, step cap, screenshot/read/pre-validate guards)
     fsInfo, // connected-folder ground truth, so sub-agents inherit it (see runChild)
-    domainPack: domainPackText // gate roles judge platform-behavior claims against THIS, not memory (run #16)
+    domainPack: domainPackText, // gate roles judge platform-behavior claims against THIS, not memory (run #16)
+    executePlan: !!opts.executePlan, // an approved-plan run that makes ZERO tool calls did not execute (2026-09-09)
+    // The last assistant answer, so the echo guard can catch a turn that just replays it.
+    prevAssistantText: (() => {
+      for (let i = history.length - 1; i >= 0; i--) {
+        if (history[i] && history[i].role === "assistant" && String(history[i].content || "").trim()) {
+          return String(history[i].content);
+        }
+      }
+      return "";
+    })()
   };
 
   // Phase engine (IMPROVEMENTS_PHASE_ENGINE.md; MM 6a581885): CODE-enforced
@@ -1392,6 +1743,8 @@ async function agentLoop(ctx) {
   // trajectory save, no clearRunState from in here; results return structured.
   // ctx.embedded.evidenceLedger collects code-built evidence entries (§3.5.1).
   const embedded = ctx.embedded || null;
+  // Earlier runs' verified file writes, for the grounding ledger (MM pass 2 B-3).
+  if (!Array.isArray(ctx.writeReceipts)) { try { ctx.writeReceipts = await loadWriteReceipts(); } catch { ctx.writeReceipts = []; } }
 
   // Desktop-control gate: when the opt-in toggle is OFF, strip every desktop_*
   // tool from what the model can even see (the executor also hard-refuses them —
@@ -1407,6 +1760,13 @@ async function agentLoop(ctx) {
   if (!settings.commandExecEnabled) {
     toolList = toolList.filter((t) => (t.function && t.function.name) !== "run_command");
   }
+  if (ctx.liveTradingPackInjected) { // REAL-MONEY run: no OS control, no shell (MM 6aa484e7 P2)
+    toolList = toolList.filter((t) => !DESKTOP_ACTION_TOOL_NAMES.has(t.function && t.function.name) && (t.function && t.function.name) !== "run_command");
+  }
+  // 09k: ServiceNow tool schemas only when ServiceNow is in play (decided once per run; a
+  // resumed run and a sub-agent decide on their own task text + the same connection/tab facts).
+  if (ctx.snToolsRelevant === undefined) ctx.snToolsRelevant = await snToolsRelevant(ctx.taskText);
+  if (!ctx.snToolsRelevant) toolList = withoutSnTools(toolList);
 
   // CODEX CANNOT BE THE BROWSER AGENT (proven live 2026-07-16, error
   // "codex/sandbox-state-meta: missing field sandboxPolicy"): the Codex CLI is
@@ -1437,9 +1797,10 @@ async function agentLoop(ctx) {
   // Trading-pack runs carry a comparably large prompt (pack + tool schema) and hit
   // the SAME silent context-overflow hang on local Ollama — the gate was previously
   // m1ReadOnly-only, leaving 60-step trading cycles exposed (master-mind 6a491b6a).
-  // Prefer the PRECISE injection flag (pack actually in the prompt); resumed runs
-  // predate the flag, so they fall back to the global-toggle heuristic.
-  const bigPackRun = ctx.m1ReadOnly ||
+  // Prefer the PRECISE injection flag (pack actually in the prompt). 09l checkpoints it, so
+  // only a checkpoint written before 09l lacks it; that case falls back to the global-toggle
+  // heuristic (fail-closed: the guard and the floor stay ON).
+  const bigPackRun = ctx.m1ReadOnly || (!isChild && !!ctx.liveTradingPackInjected) ||
     (!isChild && (ctx.tradingPackInjected != null
       ? !!ctx.tradingPackInjected
       : (settings.tradingPackEnabled || settings.paperOrderSubmissionEnabled)));
@@ -1471,7 +1832,17 @@ async function agentLoop(ctx) {
           // Persist the safety pin so a resume after MV3 eviction can't revert a
           // real-money M1 run to prompt-only enforcement (review BLOCKER 1).
           m1ReadOnly: !!ctx.m1ReadOnly, readOnly: !!ctx.readOnly,
-          snInstanceReadOnly: ctx.snInstanceReadOnly || null // instance read-only pin survives MV3 eviction too
+          snInstanceReadOnly: ctx.snInstanceReadOnly || null, // instance read-only pin survives MV3 eviction too
+          // The grounding guard's inputs survive a resume too (MM pass 2 B-3): an approved
+          // plan that resumes after eviction is still an execute-plan run.
+          executePlan: !!ctx.executePlan,
+          prevAssistantText: String(ctx.prevAssistantText || "").slice(0, 6000),
+          groundNudged: !!ctx.startGroundNudged,
+          // 09l (MM 6aa23373 D-1): the trading-pack injection flag survives a resume, so the
+          // screenshot guard keeps its precise answer instead of the global-toggle fallback.
+          // Absent in an older checkpoint stays absent (= unknown), never coerced to false.
+          ...(typeof ctx.tradingPackInjected === "boolean" ? { tradingPackInjected: ctx.tradingPackInjected } : {}),
+          ...(typeof ctx.liveTradingPackInjected === "boolean" ? { liveTradingPackInjected: ctx.liveTradingPackInjected } : {})
         });
 
   // Step cap: a sub-agent gets an explicit finite budget (MF-5); a top-level run
@@ -1491,14 +1862,17 @@ async function agentLoop(ctx) {
   // legitimately long; give the trading pack a higher dedicated floor automatically
   // when the user HAS set a finite cap, without hand-tuning maxSteps. A user-set
   // higher maxSteps still wins; children use their own override.
-  const TRADING_STEP_CAP = 60;
+  const TRADING_STEP_CAP = 110;
   const userCap = settings.maxSteps > 0 ? settings.maxSteps : Infinity;
   let cap = ctx.maxStepsOverride != null ? ctx.maxStepsOverride : userCap;
   // NOT on an M1 real-money run: even with the trading toggle on, an M1 (read-only) run
   // must never inherit trading step-caps or the trading screenshot guard (that guard
   // firing on M1 gave a FALSE sense of protection in a real run). Gate trading behavior
   // off whenever this run is M1-locked.
-  const isTrading = !isChild && !ctx.m1ReadOnly && ctx.maxStepsOverride == null && (settings.tradingPackEnabled || settings.paperOrderSubmissionEnabled);
+  // 09h: key on the pack ACTUALLY injected this run (URL-gated), never the global toggles --
+  // both toggles are ON by default since 09-04, so the old test disabled capture_screenshot
+  // on every page of a fresh install (v2 recording 2026-09-09 23:26: Wikipedia chart refused).
+  const isTrading = !isChild && !ctx.m1ReadOnly && ctx.maxStepsOverride == null && (!!ctx.liveTradingPackInjected || (ctx.tradingPackInjected != null ? !!ctx.tradingPackInjected : (settings.tradingPackEnabled || settings.paperOrderSubmissionEnabled)));
   if (isTrading) {
     cap = Math.max(cap, TRADING_STEP_CAP); // Math.max(Infinity, 60) === Infinity, so Ollama stays unlimited
   }
@@ -1506,6 +1880,7 @@ async function agentLoop(ctx) {
   let nudged = ctx.startNudged || false; // one-shot silent-turn recovery (see below)
   try { forgetAclDenials(); } catch {} // per-run: an ACL granted since the last run must not stay "remembered" (MM 09-04 pass 2)
   let fabNudged = false; // one-shot anti-fabrication recovery (claims tool work it never did)
+  let groundNudged = !!ctx.startGroundNudged; // one-shot: claimed file writes / page reads the tool ledger never recorded (2026-09-09)
   let continuations = 0; // TRUNCATION CONTINUATION (2026-09-03): a cut-off final answer is continued, at most twice
   let truncPrefix = "";  // the cut-off part(s), joined in front of the continuation for the saved final text
   let emptyNudged = false; // one-shot convergence nudge after a run of fruitless lookups
@@ -1587,7 +1962,7 @@ async function agentLoop(ctx) {
       budgetNudged = true;
       messages.push({
         role: "user",
-        content: `STEP BUDGET LOW — only ${cap - step} of ${cap} steps remain this cycle. STOP exploring tabs and STOP re-reading the page. Converge NOW: if a candidate already clears the rule table and the tradability floor, go DIRECTLY to the "Place Manual Order" form — query the fields, fill SYMBOL/SIDE/QTY/TYPE/STOP/TARGET, click Validate, and Submit ONLY if it says "VALIDATION: ACCEPTED". If nothing qualifies, output your final NO-TRADE answer right now. Do NOT open Docs/Settings/Alerts/scheduler. Running out of steps before you act wastes the entire cycle.`
+        content: `STEP BUDGET LOW — only ${cap - step} of ${cap} steps remain this cycle. STOP exploring tabs and STOP re-reading the page. Converge NOW: if a candidate already clears the rule table and the tradability floor, go DIRECTLY to the "Place Manual Order" form — query the fields, fill SYMBOL/SIDE/QTY/TYPE/STOP/TARGET, click Validate, and ${(ctx.liveTradingPackInjected && settings.liveOrderSubmissionEnabled !== true) ? "then STOP — a human clicks Submit Order on the real-money page" : "Submit ONLY if it says \"VALIDATION: ACCEPTED\""}. If nothing qualifies, output your final NO-TRADE answer right now. Do NOT open Docs/Settings/Alerts/scheduler. Running out of steps before you act wastes the entire cycle.`
       });
     }
     // STEP-CAP AUTO-EXTEND (2026-08-20): a finite cap that expires while the model
@@ -1772,6 +2147,32 @@ async function agentLoop(ctx) {
         continue; // re-run the model for a text answer
       }
 
+      // GROUNDED-WORK RECOVERY (2026-09-09). Runs BEFORE the ServiceNow nudge below,
+      // because that one is SN-shaped and misfires on filesystem work: in the
+      // competitive-intel run (export 16:29) a battlecard task whose answer said
+      // "corrected" near the words "change log" tripped `claimsWrite`, and the model
+      // spent its one recovery turn arguing "there is no ServiceNow work in this task"
+      // instead of writing the files. Worse, the plain filesystem cases — "The four
+      // files are written" with zero write calls, four pages described with zero tool
+      // calls — matched NOTHING and got no retry at all. The banner at the ship point
+      // catches those honestly, but honest-and-useless is still useless: the point is
+      // to make the model go and DO the work. groundingScan classifies the claim with
+      // no SN bias, so the nudge can name the right tools.
+      if (!groundNudged && String(content || "").trim() && !isConceptualTurn(ctx.taskText || "")) {
+        const claim = groundingScan(String(content), groundingLedger(steps, ctx));
+        if (claim) {
+          groundNudged = true; ctx.startGroundNudged = true; // persisted by the checkpoint (MM pass 3, N-13)
+          post({ type: "tool", name: "grounded_work_retry", args: { kind: claim.kind } });
+          post({ type: "tool_result", name: "grounded_work_retry", result: {
+            ok: false, kind: claim.kind, retrying: true,
+            note: "The answer claimed work no tool performed. Sending it back to do it for real (once)."
+          } });
+          messages.push({ role: "user", content: groundedWorkNudge(claim) });
+          await checkpoint(step + 1, nudged);
+          continue; // send it back to do the work for real
+        }
+      }
+
       // ANTI-FABRICATION RECOVERY: the model produced a NON-empty final answer that
       // CLAIMS tool work it never actually performed this run — e.g. a "Sub-agent
       // Execution Summary" table when spawn_subagent was never called, or "updated
@@ -1789,7 +2190,7 @@ async function agentLoop(ctx) {
         const fabSubagent = ctx.allowSubagents && !ranSpawn &&
           /sub-?agent/i.test(txt) && /\b(success|complete|completed|done|executed|finished|status|summary)\b/i.test(txt);
         // (b) cites a SN record number / claims a record write, but took NO action at all
-        const citesRecord = /\b(INC|CHG|RITM|PRB|SCTASK|REQ)\d{3,}\b/i.test(txt);
+        const citesRecord = SN_RECORD_RX.test(txt); // one regex with the grounding ledger (MM pass 2 B-5)
         const claimsWrite = /\b(updated|saved|appended|modified|wrote|created|set)\b/i.test(txt) &&
           /\b(record|incident|change|request|description|field|sys_id|table)\b/i.test(txt);
         // CONCEPTUAL-TURN EXEMPTION (2026-07-20z, live a-live-run): a definitional
@@ -1831,13 +2232,19 @@ async function agentLoop(ctx) {
           post({ type: "continued", why, n: continuations });
           messages.push({
             role: "user",
-            content: "Your previous message was CUT OFF at its end (" + why + "). Continue EXACTLY where you stopped: do not repeat anything you already wrote, do not restart or summarise the document, do not apologise. Finish the remaining part — including every remaining lettered/numbered section the request asked for and the final checklist if one was requested. Plain text, no tool calls."
+            content: "Your previous message was CUT OFF at its end (" + why + "). Continue EXACTLY where you stopped: do not repeat anything you already wrote, do not restart or summarise the document, do not apologise. Finish the remaining part — including every remaining lettered/numbered section the request asked for and the final checklist if one was requested. Plain text, no tool calls. If NOTHING is in fact missing, reply with exactly: NOTHING_MISSING"
           });
           await checkpoint(step + 1, nudged);
           continue;
         }
       }
-      if (truncPrefix) { content = truncPrefix + "\n" + String(content || ""); truncPrefix = ""; }
+      if (truncPrefix) {
+        // A "continuation" that denies being cut off is not part of the answer (2026-09-08a,
+        // resume-tailoring export 01:00: "I cannot complete this request because there is no
+        // previous message … that was cut off" was appended to a complete research answer).
+        content = isNonContinuation(content) ? truncPrefix : truncPrefix + "\n" + String(content || "");
+        truncPrefix = "";
+      }
 
       // SOURCE-CITATION NUDGE (one-shot): the run DID read local files (📁 Local
       // files / Filesystem MCP) — so the answer is grounded in them — but the model
@@ -1931,6 +2338,9 @@ async function agentLoop(ctx) {
         return { status: "final", finalText: content, steps, runId,
           evidenceLedger: embedded.evidenceLedger, modelIdentity: `${activeProvider(settings)}:${agentModel}` };
       }
+      // GROUNDING / ECHO / NOT-EXECUTED guards (2026-09-09) — last thing before the answer
+      // ships, so a claim the ledger does not support cannot reach the user clean.
+      content = runGroundingGuard(content, steps, ctx, post);
       post({ type: "final", text: content, runId });
       return { status: "final", finalText: content, steps, runId };
     }
@@ -1954,7 +2364,26 @@ async function agentLoop(ctx) {
       }
       const name = call.function?.name;
       const args = parseArgs(call.function?.arguments);
+      // read_page{url} NAVIGATES (09-09a). Every gate that governs navigate governs it too,
+      // or the url branch is a side door around read-only mode, ask-mode approval and the
+      // M1 route allowlist (MM 09-09 F3). One predicate, used by all three gates below.
+      const navLike = name === "navigate" || (name === "read_page" && !!(args && args.url && String(args.url).trim()));
 
+      // Inbox-drafter send guard (defense-in-depth for the inbox pack): while the
+      // mailbox pack is active, send_email / send_sms run only if the LATEST user
+      // message carries the exact approval phrase. The prompt rule alone is not a
+      // guardrail; this is.
+      if (ctx.inboxDrafter && (name === "send_email" || name === "send_sms")) {
+        const lastUser = String([...messages].reverse().find((m) => m.role === "user")?.content || "");
+        if (!/APPROVED \u2014 SEND IT/.test(lastUser)) {
+          const ro = { error: `Inbox drafter mode: "${name}" is blocked. Drafts stay in the composer; a message is sent only after the user types the exact phrase "APPROVED \u2014 SEND IT" in this conversation.` };
+          post({ type: "tool", name, args });
+          post({ type: "tool_result", name, result: ro, stepIndex: steps.length, runId });
+          messages.push({ role: "tool", name, content: JSON.stringify(ro) });
+          steps.push({ tool: name, args: redactArgs(name, args), error: ro.error.slice(0, 160) });
+          continue;
+        }
+      }
       // M1 fail-closed guard (defense-in-depth) — MUST be the FIRST check in the loop,
       // BEFORE the spawn_subagent interception below, so a text-recovered tool call
       // (incl. spawn_subagent, recovered by extractTextToolCalls) cannot slip past it.
@@ -1971,7 +2400,17 @@ async function agentLoop(ctx) {
       // navigate is permitted under M1 ONLY to an allowlisted READ-ONLY route (fail-closed
       // URL check). A transactional/login/off-origin target is refused here, before the
       // tab ever moves. Catches text-recovered navigate too (same per-call loop).
-      if (ctx.m1ReadOnly && name === "navigate" && !isM1ReadOnlyRoute(args && args.url)) {
+      if (ctx.m1ReadOnly && ctx.isChild && name === "read_page" && navLike) {
+        // M1 children are NAVLESS (CHILD_TOOLS minus navigate); a url on read_page must
+        // not hand the navigation back (MM 09-09 F3).
+        const ro = { error: "M1 portfolio mode: sub-agents do not navigate. Call read_page WITHOUT url to read the tab you were given." };
+        post({ type: "tool", name, args });
+        post({ type: "tool_result", name, result: ro, stepIndex: steps.length, runId });
+        messages.push({ role: "tool", name, content: JSON.stringify(ro) });
+        steps.push({ tool: name, args: redactArgs(name, args), error: ro.error.slice(0, 160) });
+        continue;
+      }
+      if (ctx.m1ReadOnly && navLike && !isM1ReadOnlyRoute(args && args.url)) {
         const ro = { error: `M1 portfolio mode is READ-ONLY: navigation to "${String((args && args.url) || "").slice(0, 200)}" is blocked. Only read-only M1 pages on dashboard.m1.com are allowed (home, your Invest portfolio, Concentration analysis sector/asset/region). Trading, transfer, settings, login, and off-origin URLs are mechanically refused. Read the href of a read-only insight link and navigate to that, or ask the user to open the page.` };
         post({ type: "tool", name, args });
         post({ type: "tool_result", name, result: ro, stepIndex: steps.length, runId });
@@ -1997,7 +2436,7 @@ async function agentLoop(ctx) {
         }
         if (rejection) {
           post({ type: "tool_result", name, result: rejection, stepIndex: steps.length, runId });
-          messages.push({ role: "tool", name, content: JSON.stringify(rejection).slice(0, 8000) });
+          messages.push({ role: "tool", name, content: capToolPayload(JSON.stringify(rejection)) });
           steps.push({ tool: name, args: redactArgs(name, args), ok: false, error: String(rejection.error).slice(0, 160) });
           continue;
         }
@@ -2019,11 +2458,16 @@ async function agentLoop(ctx) {
       // identical re-reads (9 read_page calls to open one folder). Consecutive
       // read_page calls are duplicates regardless of arg tweaks — any intervening
       // DIFFERENT tool still resets the counter, so click→read→click→read is fine.
-      const callSig = name === "read_page" ? "read_page" : name + ":" + JSON.stringify(args);
+      // 2026-09-09: keyed by the target url so four reads of four DIFFERENT pages are
+      // four signatures. Same page with a tweaked max_chars still collides (the 2026-07-22
+      // dodge). See callSignature in loop-guards.js for the incident.
+      const callSig = callSignature(name, args, ctx._pageKey);
       if (ctx._lastSig === callSig) ctx._consec = (ctx._consec || 1) + 1;
       else { ctx._lastSig = callSig; ctx._consec = 1; }
       if (ctx._consec >= 3) {
-        const dupResult = { error: `You have ALREADY called ${name} with these exact arguments — its result is in the conversation above. Do NOT call it again. Use the information you already gathered and write your final answer NOW.` };
+        // A repeat of a call that FAILED is not a re-read: say so, with the error
+        // (2026-09-07c; wording lives in loop-guards.js so it is testable).
+        const dupResult = { error: repeatRefusal({ name, kind: "consecutive", seen: ctx._consec, lastError: ctx._sigLastErr && ctx._sigLastErr.get(callSig) }) };
         post({ type: "tool", name, args });
         post({ type: "tool_result", name, result: dupResult, stepIndex: steps.length, runId });
         messages.push({ role: "tool", name, content: JSON.stringify(dupResult) });
@@ -2044,7 +2488,15 @@ async function agentLoop(ctx) {
       // editor index 0 on three DIFFERENT pages is three distinct signatures, while
       // the third fetch of the SAME page's editor is refused. navigate itself is
       // keyed by its own URL. Refusals share the _dupBlocks counter → salvage.
-      if (name === "navigate" && args && args.url) ctx._pageKey = String(args.url);
+      if (name === "navigate" && args && args.url) { ctx._pageKey = String(args.url); ctx._domEpoch = 0; }
+      // DOM EPOCH (2026-09-09): on a SPA a click replaces the visible content without
+      // navigating, so page-scoped read signatures collided across genuinely different
+      // views (Signals tab vs Watchlist vs the Analysis panel a row-click opens). Any
+      // interaction that mutates the DOM starts a new epoch, so the next read is a new
+      // signature. A repeated read with no interaction in between still cycles.
+      const DOM_MUTATING = ["click_element", "fill_input", "select_option", "press_key",
+        "submit_form", "scroll", "hover", "open_form_section", "set_editor_value"];
+      if (DOM_MUTATING.indexOf(name) !== -1) ctx._domEpoch = (ctx._domEpoch || 0) + 1;
       // sn_query_* are keyed by table+query ONLY (fields/limit dropped): the
       // 2026-08-18 13:34 run re-issued the same failing `questionLIKEStart Date`
       // query 12x, each time with a shorter `fields` list, and every variant was a
@@ -2058,12 +2510,12 @@ async function agentLoop(ctx) {
       const userAskedForUrl = name === "navigate" && args && args.url && String(ctx.taskText || "").includes(String(args.url).split("&sysparm_sys_id=")[0]);
       const cycleSig = userAskedForUrl ? null : name === "navigate" ? callSig
         : isSnQuery ? name + ":" + JSON.stringify({ table: args && args.table, query: args && args.query })
-        : (ctx._pageKey || "") + "|" + callSig;
+        : (ctx._pageKey || "") + "#" + (ctx._domEpoch || 0) + "|" + callSig;
       if (!ctx._sigCounts) ctx._sigCounts = new Map();
       const seen = cycleSig == null ? 0 : (ctx._sigCounts.get(cycleSig) || 0) + 1;
       if (cycleSig != null) ctx._sigCounts.set(cycleSig, seen);
       if (seen >= 3) {
-        const cyc = { error: `CYCLE DETECTED: this is call #${seen} of ${name} with these arguments${name !== "navigate" ? " on the same page" : ""}. You are re-fetching content you already read (the earlier copy was trimmed from context to fit the window). Do NOT fetch it again. Write your findings NOW for every artifact you have already read, in plain text as your final answer; note briefly anything you could not retain.` };
+        const cyc = { error: repeatRefusal({ name, kind: "cycle", seen, lastError: ctx._sigLastErr && ctx._sigLastErr.get(cycleSig), pageScoped: name !== "navigate" }) };
         post({ type: "tool", name, args });
         post({ type: "tool_result", name, result: cyc, stepIndex: steps.length, runId });
         messages.push({ role: "tool", name, content: JSON.stringify(cyc) });
@@ -2078,8 +2530,25 @@ async function agentLoop(ctx) {
       // CARVE-OUT: on an M1 run, navigate is in ACTION_TOOLS but was already validated
       // against the read-only route allowlist by the M1 navigate guard above — so don't
       // re-block it here (this guard would otherwise kill the allowlisted navigation).
-      if (ctx.readOnly && ACTION_TOOLS.has(name) && !(ctx.m1ReadOnly && name === "navigate")) {
-        const ro = { error: `READ-ONLY mode is ON: ${name} and all changes are DISABLED. Do NOT modify ServiceNow, the page, or files. Gather what you need with read tools (read_page, query_elements, sn_query_*, sn_fetch_*, read_file, web_search, google_search) and write your analysis/report.` };
+      if (ctx.liveTradingPackInjected && (name === "run_command" || DESKTOP_ACTION_TOOL_NAMES.has(name))) { // MM pass 2 S3: schema stripping is not enforcement
+        const g = { error: "REAL-MONEY run: OS control and shell are refused (schema-stripped and executor-refused)." };
+        post({ type: "tool", name, args }); post({ type: "tool_result", name, result: g, stepIndex: steps.length, runId });
+        messages.push({ role: "tool", name, content: JSON.stringify(g) }); steps.push({ tool: name, args: redactArgs(name, args), error: g.error.slice(0, 160) }); continue;
+      }
+      // MM pass 2 S4: a run that did not start on the live page may not act on it (drift guard; children are read-only via P4).
+      if (!ctx.liveTradingPackInjected && !isChild && (ACTION_TOOLS.has(name) || name === "press_key" || navLike)) { // MM pass 3 L3
+        let driftLive = false;
+        try { const [drift] = await chrome.tabs.query({ active: true, lastFocusedWindow: true }); driftLive = !!(drift && needsLiveTradingPack(drift.url)); } catch {}
+        if (driftLive) {
+          const g = { error: "REAL-MONEY page reached mid-run without the live-trading pack — DOM actions refused here. Start a NEW run with live-trading.html active and the live pack enabled." };
+          post({ type: "tool", name, args }); post({ type: "tool_result", name, result: g, stepIndex: steps.length, runId });
+          messages.push({ role: "tool", name, content: JSON.stringify(g) }); steps.push({ tool: name, args: redactArgs(name, args), error: g.error.slice(0, 160) }); continue;
+        }
+      }
+      if (ctx.readOnly && (ACTION_TOOLS.has(name) || navLike) && !(ctx.m1ReadOnly && navLike)) {
+        const ro = name === "read_page"
+          ? { error: `READ-ONLY mode is ON: read_page with a \`url\` would NAVIGATE the tab, and navigation is an action this mode disables. Call read_page WITHOUT url to read the page that is already open, or ask the user to open ${String((args && args.url) || "").slice(0, 200)} and then read it.` }
+          : { error: `READ-ONLY mode is ON: ${name} and all changes are DISABLED. Do NOT modify ServiceNow, the page, or files. Gather what you need with read tools (read_page, query_elements, sn_query_*, sn_fetch_*, read_file, web_search, google_search) and write your analysis/report.` };
         post({ type: "tool", name, args });
         post({ type: "tool_result", name, result: ro, stepIndex: steps.length, runId });
         messages.push({ role: "tool", name, content: JSON.stringify(ro) });
@@ -2127,7 +2596,7 @@ async function agentLoop(ctx) {
       if (isTrading) {
         // (a) Vision is off-limits — the pack forbids reading prices/levels off a
         // chart screenshot (vision misreads them); use the app's numeric data.
-        if (name === "capture_screenshot") {
+        if (name === "capture_screenshot" || name === "desktop_screenshot") { // MM pass 2 Low
           const g = { error: "capture_screenshot is DISABLED in day-trading mode — vision misreads prices/levels. Use the app's NUMERIC data instead (read_page / query_elements / the Analysis tab), then act on a candidate." };
           post({ type: "tool", name, args });
           post({ type: "tool_result", name, result: g, stepIndex: steps.length, runId });
@@ -2139,7 +2608,7 @@ async function agentLoop(ctx) {
         // content is already in the conversation and the model needs to ACT.
         if (name === "read_page") {
           if ((ctx._tradeReads || 0) >= 12) {
-            const g = { error: `You have already called read_page 12 times this cycle — the page content is in the conversation above. STOP re-reading. Act on what you have: go to the "Place Manual Order" form (fill → Validate → submit only if ACCEPTED) or output your final NO-TRADE answer NOW.` };
+            const g = { error: `You have already called read_page 12 times this cycle — the page content is in the conversation above. STOP re-reading. Act on what you have: go to the "Place Manual Order" form (fill → Validate → ${(ctx.liveTradingPackInjected && settings.liveOrderSubmissionEnabled !== true) ? "STOP; a human clicks Submit" : "submit only if ACCEPTED"}) or output your final NO-TRADE answer NOW.` };
             post({ type: "tool", name, args });
             post({ type: "tool_result", name, result: g, stepIndex: steps.length, runId });
             messages.push({ role: "tool", name, content: JSON.stringify(g) });
@@ -2156,7 +2625,7 @@ async function agentLoop(ctx) {
         // reject Validate + its follow-up read burns ~2 steps). FAIL-OPEN: on accepted
         // / non-Validate click / unreadable / any error, do nothing and let the click
         // proceed (never a false block; the server remains the hard backstop).
-        if (name === "click_element" && args && args.selector) {
+        if (name === "click_element" && args && args.selector && !ctx.liveTradingPackInjected) { // MM pass 2 S7: paper page only
           let pre = null;
           try {
             const [vtab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
@@ -2169,7 +2638,7 @@ async function agentLoop(ctx) {
             }
           } catch { /* fail-open */ }
           if (pre && pre.rejected) {
-            const g = { error: `PRE-VALIDATE (saved a wasted Validate click): the dry-run ALREADY REJECTS this order — ${pre.text} ── Do NOT re-click Validate. If the blockers are sizing (OVERSIZE / RISK_TOO_HIGH), the server's rejection text includes "resubmit with qty=N (server-computed max)" — use EXACTLY that N as the new quantity (do NOT recompute your own qty; your formula produced the rejected number). If it says "no valid qty passes the caps — NO-TRADE this symbol", ABANDON the symbol (no resubmit). If neither phrase is present, fall back to qty=floor(0.005·equity/|entry−stop|) with notional ≤ 10% equity. For RR_TOO_LOW fix the target (never widen the stop), then try ONCE more. If the blockers are MAX_POSITIONS or DUPLICATE_SYMBOL, that is a NO-TRADE this cycle — do NOT retry and do NOT close existing positions to make room.` };
+            const g = { error: `PRE-VALIDATE (saved a wasted Validate click): the dry-run ALREADY REJECTS this order — ${pre.text} ── Do NOT re-click Validate. If the blockers are sizing (OVERSIZE / RISK_TOO_HIGH), the server's rejection text includes "resubmit with qty=N (server-computed max)" — use EXACTLY that N as the new quantity (do NOT recompute your own qty; your formula produced the rejected number). If it says "no valid qty passes the caps — NO-TRADE this symbol", ABANDON the symbol (no resubmit). If neither phrase is present, re-size with the PACK'S sizing formula (risk_budget and notional cap as stated in the pack — do not use any other formula). For RR_TOO_LOW fix the target (never widen the stop), then try ONCE more. If the blockers are MAX_POSITIONS or DUPLICATE_SYMBOL, that is a NO-TRADE this cycle — do NOT retry and do NOT close existing positions to make room.` };
             post({ type: "tool", name, args });
             post({ type: "tool_result", name, result: g, stepIndex: steps.length, runId });
             messages.push({ role: "tool", name, content: JSON.stringify(g) });
@@ -2188,7 +2657,7 @@ async function agentLoop(ctx) {
       // http_request: a GET is read-only (no forced prompt); any other method
       // CHANGES remote state, so it always pauses like a write.
       const mutatingHttp = name === "http_request" && !["GET", "HEAD"].includes(String(args && args.method || "GET").toUpperCase());
-      if (ACTION_TOOLS.has(name) && !APPROVAL_EXEMPT_TOOLS.has(name) && (ALWAYS_CONFIRM_TOOLS.has(name) || destructiveOverwrite || mutatingHttp || (await getActMode()) === "ask")) {
+      if ((ACTION_TOOLS.has(name) || navLike) && !APPROVAL_EXEMPT_TOOLS.has(name) && (ALWAYS_CONFIRM_TOOLS.has(name) || destructiveOverwrite || mutatingHttp || (await getActMode()) === "ask")) {
         const approved = await askApproval(name, args);
         if (signal.aborted) {
           post({ type: "aborted" });
@@ -2221,7 +2690,8 @@ async function agentLoop(ctx) {
         // tool's own timeout — Stop must feel instant. Any non-abort error becomes a
         // normal tool-error result the model can react to and continue from.
         result = await abortableRace(
-          executeTool(name, args, { settings, signal, subScope: ctx.subScope, snInstance: ctx.snInstance }),
+          executeTool(name, args, { settings, signal, subScope: ctx.subScope, snInstance: ctx.snInstance,
+            readOnly: !!ctx.readOnly, m1ReadOnly: !!ctx.m1ReadOnly, isChild: !!ctx.isChild, liveTradingPackInjected: ctx.liveTradingPackInjected === true }), // pins reach the executor (MM 09-09 H-2a; live flag MM pass 2 S3)
           signal
         );
       } catch (e) {
@@ -2230,6 +2700,32 @@ async function agentLoop(ctx) {
           return { status: "aborted", steps, runId };
         }
         result = { error: e.message };
+      }
+      // Remember whether THIS signature's latest REAL result was an error, so a
+      // later repeat refusal can say "this call FAILED N times with: …" instead
+      // of claiming the content was read (2026-09-07c, Records-folder run).
+      // Refusals `continue` above this point, so they never overwrite it.
+      // A url-targeted read_page navigates too (2026-09-09), so it moves the page key the
+      // way navigate does — but only once the read is PROVEN (result without error). A
+      // refused or mismatched read must not re-key the page (MM 09-09 P3).
+      if (name === "read_page" && args && args.url && result && !result.error && result.read !== false) { ctx._pageKey = String(result.redirected_to || result.url || args.url); ctx._domEpoch = 0; }
+      // A file write that returned ok becomes a RECEIPT for later runs (MM pass 2 B-3).
+      if (result && !result.error && result.ok !== false && (name === "write_file" || name === "create_document" || name === "edit_file" || name === "move_file" || name === "copy_file")) {
+        // move/copy: the tool's RESOLVED destination (a directory target becomes dir/name), not args.to (N-4).
+        const wp = name === "move_file" || name === "copy_file"
+          ? [result.to || (args && args.to)]
+          : [result.path || (args && args.path)];
+        const root = String(result.root || "");
+        const entries = wp.filter(Boolean).map((x) => ({ p: String(x), root }));
+        recordWriteReceipts(entries);
+        if (!Array.isArray(ctx.writeReceipts)) ctx.writeReceipts = [];
+        ctx.writeReceipts.push(...entries);
+      }
+      if (!ctx._sigLastErr) ctx._sigLastErr = new Map();
+      {
+        const errText = result && result.error ? String(result.error) : null;
+        ctx._sigLastErr.set(callSig, errText);
+        if (cycleSig != null) ctx._sigLastErr.set(cycleSig, errText);
       }
       // UNCHANGED-PAGE SHORT-CIRCUIT (2026-07-22 dashboard transcript: 22 tool
       // calls to open one folder; several read_page results were byte-identical,
@@ -2247,6 +2743,10 @@ async function agentLoop(ctx) {
         if (ctx._lastPageSig === pageSig) {
           result = {
             unchanged: true, url: result.url, title: result.title,
+            // Name what was ASKED for as well as what was read (2026-09-09): the
+            // competitive-intel run got `url: northwind-pricing` for a page it never opened.
+            ...(args && args.url && String(args.url) !== result.url ? { requested_url: String(args.url) } : {}),
+            ...(result.redirected_to ? { redirected_to: result.redirected_to } : {}), ...(result.landed_url ? { landed_url: result.landed_url } : {}), // keep the redirect facts (MM pass 2 B-1)
             note: "Page is IDENTICAL to your previous read_page result — nothing changed; the full text is already in the conversation above. Do NOT call read_page again." +
               (ctx._prevToolName === "click_element"
                 ? " Your last click had NO visible effect — do NOT repeat it. Pick a DIFFERENT element from query_elements, or navigate(url) directly if you know the target URL."
@@ -2292,7 +2792,7 @@ async function agentLoop(ctx) {
       // MM impl-review must-fix #1: `_cite` is now the list of COMPLETE,
       // copyable token strings (engine-built — the model never serializes a
       // token itself; long/multi-line/bracket values are pre-forced to
-      // path-only form). Placed FIRST in the payload so the 8000-char slice
+      // path-only form). Placed FIRST in the payload so the TOOL_RESULT_MAX_CHARS cut
       // can only ever truncate the raw result tail, never the tokens.
       let toolPayload;
       if (evId) {
@@ -2301,12 +2801,16 @@ async function agentLoop(ctx) {
       } else {
         toolPayload = JSON.stringify(result);
       }
-      messages.push({ role: "tool", name, content: toolPayload.slice(0, 8000) });
+      messages.push({ role: "tool", name, content: capToolPayload(toolPayload) });
       steps.push({
         tool: name,
         args: redactArgs(name, args),
         ok: !result?.error,
         error: result?.error ? String(result.error).slice(0, 160) : undefined,
+        method: name === "http_request" ? String((args && args.method) || "GET").toUpperCase() : undefined, // for the grounding ledger (B-9)
+        // The page a navigation/read targeted, kept whole: redactArgs keeps only 160 chars of the
+        // args, which dropped long urls from the web-research audit (MM pass 3, N-11).
+        url: (name === "navigate" || name === "read_page" || name === "fetch_page") && args && args.url ? persistableUrl(args.url) : undefined,
         verified: result?.verified
       });
       // CONVERGENCE TRACKING: a tool result that carries no usable data (an error,
@@ -2329,8 +2833,15 @@ async function agentLoop(ctx) {
       const outcomes = await runSubagents(acceptedSpawns, { parentCtx: ctx, post, signal, askApproval, concurrency });
       for (const { args, result } of outcomes) {
         post({ type: "tool_result", name: "spawn_subagent", result, stepIndex: steps.length, runId });
-        messages.push({ role: "tool", name: "spawn_subagent", content: JSON.stringify(result).slice(0, 8000) });
+        messages.push({ role: "tool", name: "spawn_subagent", content: capToolPayload(JSON.stringify(result)) });
         steps.push({ tool: "spawn_subagent", args: redactArgs("spawn_subagent", args), ok: !result?.error, error: result?.error ? String(result.error).slice(0, 160) : undefined });
+        // A child's writes are receipts the parent can restate (MM pass 3, N-11).
+        try {
+          await _receiptChain.catch(() => {}); // let this run's own pending receipts flush first
+          const fresh = await loadWriteReceipts();
+          const own = Array.isArray(ctx.writeReceipts) ? ctx.writeReceipts : [];
+          ctx.writeReceipts = fresh.concat(own.filter((o) => !fresh.some((f) => f.p === o.p && f.root === o.root)));
+        } catch {}
       }
       if (signal.aborted) { post({ type: "aborted" }); return { status: "aborted", steps, runId }; }
     }
@@ -2380,6 +2891,7 @@ async function agentLoop(ctx) {
         return { status: "final", finalText: capText, steps, runId,
           evidenceLedger: embedded.evidenceLedger, modelIdentity: `${activeProvider(settings)}:${agentModel}` };
       }
+      capText = runGroundingGuard(capText, steps, ctx, post);
       post({ type: "final", text: capText, runId });
       return { status: "final", finalText: capText, steps, runId };
     }
@@ -2396,7 +2908,7 @@ async function agentLoop(ctx) {
 // no close_tab (a child must not close a user's tab; the orchestrator cleans up).
 const CHILD_TOOLS = TOOLS.filter((t) => {
   const n = t.function && t.function.name;
-  return n !== "spawn_subagent" && n !== "close_tab";
+  return n !== "spawn_subagent" && n !== "close_tab" && n !== "create_shortcut";
 });
 
 // C.6 Phase 2 ORCHESTRATOR: run this turn's accepted sub-agents and return their
@@ -2499,12 +3011,15 @@ async function runChild({ parentCtx, args, post, signal, askApproval, childIndex
   // workspace — e.g. 5 sub-agents logging into 5 instances leaves all 5 tabs open
   // side by side. (Previously scope_url tabs were treated as ephemeral and closed in
   // finally, so each login flashed open then vanished, leaving 0–1 tabs. Bug fixed.)
-  let tabId = null, createdTab = false, keepOpen = false;
+  // preloaded=false: the pre-navigation's budget ran out with the page still
+  // arriving (slow server). The child is told, so its first navigate RESUMES the
+  // in-flight load instead of restarting it (2026-09-07 six-instance login run).
+  let tabId = null, createdTab = false, keepOpen = false, preloaded = true;
   try {
     if (scopeUrl) {
       const t = await chrome.tabs.create({ url: String(scopeUrl), active: false });
       tabId = t.id; createdTab = true; keepOpen = true;
-      await waitForLoad(tabId);
+      preloaded = await waitForLoad(tabId, loadBudgetMsFor(scopeUrl));
     } else if (scopeTab) {
       tabId = scopeTab.id; // real, existing tab id
     } else if (matchedTab) {
@@ -2524,7 +3039,7 @@ async function runChild({ parentCtx, args, post, signal, askApproval, childIndex
       const url = firstUrlIn(args.task);
       const t = await chrome.tabs.create({ url: url || "about:blank", active: false });
       tabId = t.id; createdTab = true; keepOpen = true;
-      if (url) await waitForLoad(tabId);
+      if (url) preloaded = await waitForLoad(tabId, loadBudgetMsFor(url));
     } else if (parentCtx.subScope && parentCtx.subScope.tabId != null) {
       tabId = parentCtx.subScope.tabId; // inherit the parent's bound tab if any
     } else {
@@ -2563,7 +3078,8 @@ async function runChild({ parentCtx, args, post, signal, askApproval, childIndex
     let origin = ""; try { origin = new URL(tabUrl).origin; } catch {}
     childSystem +=
       `\n\nYOUR BOUND TAB (act ONLY on this tab — ground truth, never guess a different domain):\n- URL: ${tabUrl}\n` +
-      (origin ? `- Origin: ${origin}\n` : "");
+      (origin ? `- Origin: ${origin}\n` : "") +
+      (preloaded ? "" : `- STATUS: that page is STILL LOADING (slow server — it has not finished arriving). Your FIRST step must be navigate with exactly that URL: it waits for the in-flight load without restarting it. Do not read, click, screenshot, or reload before navigate returns ok:true; if navigate reports still_loading twice, report the site as not responding and stop.\n`);
   }
   if (scopeInstance) {
     childSystem +=
@@ -2593,8 +3109,9 @@ async function runChild({ parentCtx, args, post, signal, askApproval, childIndex
   // run — real-money safety must never depend on the parent's mode. (The executor
   // target-tab guard also covers this; this keeps the child's tool SCHEMA navless too.)
   let childM1ReadOnly = !!parentCtx.m1ReadOnly;
-  if (!childM1ReadOnly && tabId != null) {
-    try { const bt = await chrome.tabs.get(tabId); if (bt && isM1DashboardUrl(bt.url)) childM1ReadOnly = true; } catch { /* tab gone — fall back to parent flag */ }
+  let childLiveReadOnly = false; // REAL-MONEY: a child bound to live-trading.html never writes (MM 6aa484e7 P4)
+  if (!childM1ReadOnly) { // MM pass 3 L7: an UNBOUND child inherits the active tab's real-money pin too
+    try { const bt = tabId != null ? await chrome.tabs.get(tabId) : (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0]; if (bt && isM1DashboardUrl(bt.url)) childM1ReadOnly = true; if (bt && needsLiveTradingPack(bt.url)) childLiveReadOnly = true; } catch { /* tab gone — fall back to parent flag */ }
   }
 
   let ret;
@@ -2618,8 +3135,8 @@ async function runChild({ parentCtx, args, post, signal, askApproval, childIndex
       allowSubagents: false,          // MF-4
       tools: childM1ReadOnly
         ? CHILD_TOOLS.filter((t) => M1_SAFE_TOOL_NAMES.has(t.function && t.function.name) && (t.function && t.function.name) !== "navigate") // M1: navless fail-closed allowlist for children (defense-in-depth; spawning is already blocked in M1 mode)
-        : (parentCtx.readOnly ? CHILD_TOOLS.filter((t) => !ACTION_TOOLS.has(t.function && t.function.name)) : CHILD_TOOLS), // MF-3 + MF-10 (+ read-only)
-      readOnly: parentCtx.readOnly || childM1ReadOnly,   // children inherit read-only enforcement (+ M1 tab → forced)
+        : ((parentCtx.readOnly || childLiveReadOnly) ? CHILD_TOOLS.filter((t) => !ACTION_TOOLS.has(t.function && t.function.name)) : CHILD_TOOLS), // MF-3 + MF-10 (+ read-only; live-bound child MM pass 2 S6)
+      readOnly: parentCtx.readOnly || childM1ReadOnly || childLiveReadOnly,   // children inherit read-only enforcement (+ M1 tab → forced)
       snInstanceReadOnly: parentCtx.snInstanceReadOnly || null, // children inherit the instance read-only pin (standing grant)
       m1ReadOnly: childM1ReadOnly, // child M1 pin: parent's OR its own bound M1 tab
       maxStepsOverride: (args.max_steps != null ? args.max_steps : 8), // MF-5
@@ -2662,6 +3179,7 @@ async function resumeAgent(post, signal, askApproval, drainSteer) {
   const settings = await getSettings();
   Object.assign(settings, await getCloudCreds()); // cloud keys for the dispatcher (see runAgent)
   settings.paperOrderSubmissionEnabled = await getSubmitEnabled(); // Phase 4 kill-switch (see runAgent)
+  settings.liveOrderSubmissionEnabled = await getLiveSubmitEnabled(); // REAL-MONEY kill-switch (see runAgent)
 
   // PHASE-AWARE RESUME (Tier 3): a phased run persists to phaseRun/phaseData
   // (NOT activeRun). If an interrupted phased run left a completed draft +
@@ -2684,7 +3202,8 @@ async function resumeAgent(post, signal, askApproval, drainSteer) {
       post, signal, askApproval,
       runId: phaseSaved.envelope?.runId || ("resume-" + (phaseSaved.envelope?.savedAt || 0)),
       taskText: phaseSaved.envelope?.taskText || "",
-      lessons: [], domainPack: domainPackText, fsInfo
+      lessons: [], domainPack: domainPackText, fsInfo,
+      liveTradingPackInjected: await (async () => { try { const [a] = await chrome.tabs.query({ active: true, lastFocusedWindow: true }); return !!(a && needsLiveTradingPack(a.url)); } catch { return false; } })() // MM 6aa484e7 P1
     };
     const res = await withRunKeepalive(() => resumePhased({ agentLoop, chatStream, withModelLock, activeProvider }, loopCtx, phaseSaved));
     if (res.resumed) return;
@@ -2709,9 +3228,11 @@ async function resumeAgent(post, signal, askApproval, drainSteer) {
   // M1 run would fall back to the full tool set and revert to prompt-only safety.
   let m1ReadOnly = !!state.m1ReadOnly;
   let readOnly = !!state.readOnly;
+  let liveResumed = state.liveTradingPackInjected === true; // REAL-MONEY pack flag survives MV3 eviction (MM 6aa484e7 P1)
   try {
     const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-    if (active && isM1DashboardUrl(active.url)) m1ReadOnly = true; // toggle-INDEPENDENT: a resumed run on dashboard.m1.com is read-only regardless of the M1 toggle
+    if (active && isM1DashboardUrl(active.url)) m1ReadOnly = true;
+    if (active && needsLiveTradingPack(active.url)) liveResumed = true; // live tab active ⇒ live run, whatever the checkpoint said // toggle-INDEPENDENT: a resumed run on dashboard.m1.com is read-only regardless of the M1 toggle
   } catch { /* tabs query unavailable — fall back to the persisted pin */ }
   if (m1ReadOnly) readOnly = true;
   await withRunKeepalive(() => agentLoop({
@@ -2729,6 +3250,11 @@ async function resumeAgent(post, signal, askApproval, drainSteer) {
     tools: m1ReadOnly ? M1_SAFE_TOOLS_NAV : (readOnly ? READ_ONLY_TOOLS : undefined), // re-apply the fail-closed pin (read tools + allowlisted navigate)
     readOnly,
     snInstanceReadOnly: state.snInstanceReadOnly || null, // restore the instance read-only pin across MV3 eviction
+    executePlan: !!state.executePlan, // grounding guard inputs restored (MM pass 2 B-3)
+    prevAssistantText: state.prevAssistantText || "",
+    startGroundNudged: !!state.groundNudged, // the one-shot grounded retry stays one-shot across a resume (N-13)
+    ...(typeof state.tradingPackInjected === "boolean" ? { tradingPackInjected: state.tradingPackInjected } : {}), // 09l: restored, absent stays unknown
+    liveTradingPackInjected: liveResumed, // REAL-MONEY pack survives MV3 eviction (MM 6aa484e7 P1)
     m1ReadOnly,
     drainSteer, // steering works on resumed runs too
     fsInfo // re-probed connected-folder ground truth for post-resume sub-agents
@@ -2846,8 +3372,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       }
       const messages = buildPromptWriterMessages(goal, page, msg.preset,
         Array.isArray(msg.snAreas) ? msg.snAreas.slice(0, 24).map(String) : [], attachments);
+      // Free (owner 2026-09-04): the backend prices purpose:"prompt_builder" at 0, runs it on the
+      // included model whatever the user selected, and caps it per account per hour. Attached
+      // images were already described above at the vision rate.
       const { content } = await withModelLock(() => chatStream({
-        base: settings.ollamaBase, model: settings.model, settings, messages, tools: []
+        base: settings.ollamaBase, model: settings.model, settings, messages, tools: [], purpose: "prompt_builder"
       }));
       const prompt = String(content || "").trim()
         .replace(/^```[a-z]*\n?/i, "").replace(/\n?```$/, "").trim(); // belt-and-braces fence strip
@@ -2856,7 +3385,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       // proof of which brain wrote the prompt (cloud model for cloud providers,
       // settings.model only on the ollama path).
       const prov = activeProvider(settings);
-      const ranModel = prov === "ollama" ? settings.model : (settings.cloudModel || prov);
+      const ranModel = prov === "ollama" ? settings.model : "included model (free)";
       sendResponse({ ok: true, prompt, model: `${prov}:${ranModel}` });
     } catch (e) {
       sendResponse({ ok: false, error: e.message || String(e) });
@@ -2877,16 +3406,16 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       });
       return;
     case "teach_start":
-      teachStart().then(sendResponse);
+      teachStart().then(sendResponse, (e) => sendResponse({ ok: false, error: "Teach failed to start: " + String((e && e.message) || e) }));
       return true;
     case "teach_stop":
-      getSettings().then((s) => teachStop(msg.narration, s)).then(sendResponse);
+      getSettings().then((s) => teachStop(msg.narration, s)).then(sendResponse, (e) => sendResponse({ ok: false, error: "Teach failed: " + String((e && e.message) || e) }));
       return true;
     case "get_workflows":
-      getWorkflows().then(sendResponse);
+      getWorkflows().then(sendResponse, () => sendResponse([]));
       return true;
     case "delete_workflow":
-      deleteWorkflow(msg.id).then(() => sendResponse({ ok: true }));
+      deleteWorkflow(msg.id).then(() => sendResponse({ ok: true }), (e) => sendResponse({ ok: false, error: String((e && e.message) || e) }));
       return true;
     default:
       return;

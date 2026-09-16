@@ -1,7 +1,8 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-product="go">
 <head>
   <meta charset="UTF-8" />
+  <script src="theme-boot.js"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Agent Go</title>
   <style>
@@ -140,7 +141,7 @@
     /* Unified composer PILL (Agent Go parity, 2026-07-19): ONE rounded container
        holds the attach/tool buttons, a borderless auto-height textarea, and a
        circular send end-cap. Styling only — every id/handler is unchanged.
-       Revert copy: <local path> */
+       Revert copy: C:\redacted\path
     .input-row { display: flex; gap: 2px; align-items: flex-end; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 24px; padding: 5px 6px; }
     .input-row:focus-within { border-color: var(--accent-blue); box-shadow: 0 0 0 1px var(--accent-blue); }
     .input-row > button, .input-row > .attach-wrap > button { height: 36px; flex: none; }
@@ -188,6 +189,15 @@
     .wf-row .run { background: var(--accent-green); color: var(--bg-primary); border: none; border-radius: 5px; padding: 4px 12px; cursor: pointer; font-family: inherit; font-size: 12px; font-weight: 600; }
     .wf-row .del { cursor: pointer; color: var(--text-secondary); font-size: 13px; }
     .wf-row .del:hover { color: var(--accent-red); }
+    .wf-row .run.secondary { background: transparent; color: var(--text-secondary); border: 1px solid var(--border-color); }
+    .wf-row .run:disabled { opacity: .5; cursor: default; }
+    .wf-row .run:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
+    .wf-params form { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 8px; align-items: center; margin-top: 6px; }
+    .wf-params label { color: var(--text-secondary); font-size: 12px; }
+    .wf-params input { background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 5px; padding: 4px 8px; font-family: inherit; font-size: 12px; min-width: 0; }
+    .wf-params input:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 1px; }
+    .wf-params input[aria-invalid="true"] { border-color: var(--accent-red); }
+    .wf-params .wf-row { grid-column: 1 / -1; }
     .slash-menu {
       display: none; background: var(--bg-secondary); border: 1px solid var(--border-color);
       border-radius: 8px; margin-bottom: 8px; overflow-y: auto; max-height: 240px;
@@ -372,56 +382,92 @@
     /* scheduled-run pending banner */
     .sched-banner { background: var(--bg-tertiary); border-left: 3px solid var(--accent-purple); padding: 7px 10px; margin: 6px 0; border-radius: 4px; font-size: 12px; color: var(--text-secondary); }
   </style>
+  <link rel="stylesheet" href="theme.css" />
 </head>
 <body>
   <header>
-    <span class="dot" id="statusDot" title="Agent Go status"></span>
-    <h1>Agent Go</h1>
-    <span class="provider-badge cloud" id="providerBadge" title="Agent Go cloud — inference runs on the Agent Go service">☁ Agent Go</span>
+    <span class="brand-mark" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h8"></path><path d="M8 4l4 4-4 4"></path></svg></span>
+    <div class="brand">
+      <h1>Agent Go</h1>
+      <div class="brand-sub">
+        <span class="dot" id="statusDot" title="Agent Go status"></span>
+        <span class="provider-badge cloud" id="providerBadge" title="Agent Go cloud — inference runs on the Agent Go service">Agent Go cloud · auto model</span>
+      </div>
+    </div>
     <span class="working" id="working" title="The agent is working"><span class="hb"></span>working <span id="workSecs"></span></span>
     <span class="spacer"></span>
     <button class="iconbtn" id="zoomOut" title="Zoom out (Ctrl −)">A−</button>
     <button class="iconbtn" id="zoomIn" title="Zoom in (Ctrl +)">A+</button>
     <div class="hdr-wrap">
-      <button class="iconbtn" id="exportBtn" title="Export the whole conversation" aria-haspopup="menu" aria-expanded="false">⬇ Export</button>
-      <div class="attach-menu hdr-menu" id="exportMenu">
-        <button id="expCopy">📋 Copy all</button>
-        <button id="expMd">⬇ Download .md</button>
-        <button id="expDocx">⬇ Download .docx</button>
-        <button id="expPdf">⬇ Download .pdf</button>
+      <button class="iconbtn" id="appearanceBtn" title="Appearance: System" aria-label="Appearance: System" aria-haspopup="menu" aria-expanded="false"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="8" cy="8" r="6"></circle><path d="M8 2a6 6 0 0 0 0 12z" fill="currentColor"></path></svg></button>
+      <div class="attach-menu hdr-menu" id="appearanceMenu" role="menu" aria-label="Appearance">
+        <button role="menuitemradio" data-theme-choice="system" aria-checked="true"><svg class="mi-ico" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><rect x="2" y="3" width="12" height="8" rx="1.5"></rect><path d="M6 14h4M8 11v3"></path></svg><span class="mi-label">System</span><span class="desc">Matches your computer</span></button>
+        <button role="menuitemradio" data-theme-choice="light" aria-checked="false"><svg class="mi-ico" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="3"></circle><path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1 1M11.6 11.6l1 1M3.4 12.6l1-1M11.6 4.4l1-1"></path></svg><span class="mi-label">Light</span><span class="desc">Always light</span></button>
+        <button role="menuitemradio" data-theme-choice="dark" aria-checked="false"><svg class="mi-ico" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 10.2A5.6 5.6 0 0 1 5.8 3a5.6 5.6 0 1 0 7.2 7.2z"></path></svg><span class="mi-label">Dark</span><span class="desc">Always dark</span></button>
       </div>
     </div>
-    <button class="iconbtn" id="clearBtn" title="Clear conversation">Clear</button>
-    <button class="iconbtn" id="settingsBtn" title="Settings">⚙ Settings</button>
+    <div class="hdr-wrap">
+      <button class="iconbtn" id="exportBtn" title="Export the whole conversation" aria-haspopup="menu" aria-expanded="false"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v8"></path><path d="M4.5 6.5L8 10l3.5-3.5"></path><path d="M3 13h10"></path></svg><span class="btn-label">Export</span></button>
+      <div class="attach-menu hdr-menu" id="exportMenu" role="menu" aria-label="Export conversation">
+        <button id="expCopy" role="menuitem"><svg class="mi-ico" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"></rect><path d="M10.5 5.5V3.8A1.3 1.3 0 0 0 9.2 2.5H3.8A1.3 1.3 0 0 0 2.5 3.8v5.4a1.3 1.3 0 0 0 1.3 1.3h1.7"></path></svg><span class="mi-label">Copy all</span></button>
+        <button id="expMd" role="menuitem"><svg class="mi-ico" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v8"></path><path d="M4.5 6.5L8 10l3.5-3.5"></path><path d="M3 13h10"></path></svg><span class="mi-label">Download .md</span></button>
+        <button id="expDocx" role="menuitem"><svg class="mi-ico" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v8"></path><path d="M4.5 6.5L8 10l3.5-3.5"></path><path d="M3 13h10"></path></svg><span class="mi-label">Download .docx</span></button>
+        <button id="expPdf" role="menuitem"><svg class="mi-ico" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v8"></path><path d="M4.5 6.5L8 10l3.5-3.5"></path><path d="M3 13h10"></path></svg><span class="mi-label">Download .pdf</span></button>
+      </div>
+    </div>
+    <button class="iconbtn" id="clearBtn" title="Clear conversation"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 4.5h11"></path><path d="M6 4.5V3a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v1.5"></path><path d="M4 4.5l.7 8.6A1 1 0 0 0 5.7 14h4.6a1 1 0 0 0 1-.9l.7-8.6"></path></svg><span class="btn-label">Clear</span></button>
+    <button class="iconbtn" id="settingsBtn" title="Settings"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="2.2"></circle><path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M3.6 12.4l1.1-1.1M11.3 4.7l1.1-1.1"></path></svg><span class="btn-label">Settings</span></button>
   </header>
 
   <!-- Proactive maintenance banner: shown (and the composer disabled) when the backend's public
        /status reports the master kill is engaged. Populated by checkAgentGoStatus(). -->
   <div id="maintBanner" class="maint-banner" hidden role="status" aria-live="polite">
-    <span class="maint-ico">🛠</span>
+    <span class="maint-ico" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2l6.5 11.5h-13z"></path><path d="M8 6.5v3.2M8 11.8v.1"></path></svg></span>
     <span>Agent&nbsp;Go is temporarily under maintenance — we'll be back shortly.</span>
   </div>
 
   <!-- "A newer pack is available" (2026-09-03): stored daily check, see update-check.js. -->
   <div id="updateBanner" class="update-banner" hidden role="status" aria-live="polite">
-    <span>⬆</span>
+    <span class="upd-ico" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3"></path><path d="M4 7l4-4 4 4"></path></svg></span>
     <span class="grow" id="updateBannerText"></span>
     <button id="updateBannerGo" type="button" title="Open the Agent Go download page">Download</button>
-    <button id="updateBannerDismiss" type="button" title="Hide for this version">✕</button>
+    <button id="updateBannerDismiss" type="button" title="Hide for this version" aria-label="Hide for this version"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M2 2l6 6M8 2L2 8"></path></svg></button>
   </div>
 
   <div id="status">Connecting to Agent Go…</div>
+  <!-- Model and autonomy mode bar under the header (design refresh 2026-09-14); same ids and handlers. -->
+    <div class="mode-row">
+      <div class="attach-wrap">
+        <button class="modebtn" id="modeBtn" aria-haspopup="menu" aria-expanded="false">📋 Plan first ▾</button>
+        <div class="attach-menu" id="modeMenu" role="menu" aria-label="Autonomy mode">
+          <button id="modePlan" role="menuitem"><span class="mode-dot plan" aria-hidden="true"></span><span class="mi-label">Plan first</span><span class="check" id="checkPlan">✓</span>
+            <span class="desc">Drafts a step-by-step plan and waits for your approval before doing anything.</span>
+          </button>
+          <button id="modeAsk" role="menuitem"><span class="mode-dot ask" aria-hidden="true"></span><span class="mi-label">Ask before acting</span><span class="check" id="checkAsk" style="display:none">✓</span>
+            <span class="desc">Pauses for your approval before each action — clicking, typing, navigating, or making changes.</span>
+          </button>
+          <button id="modeAuto" role="menuitem"><span class="mode-dot auto" aria-hidden="true"></span><span class="mi-label">Act without asking</span><span class="check" id="checkAuto" style="display:none">✓</span>
+            <span class="desc">Acts on its own without pausing for approval — the Stop button still halts it.</span>
+          </button>
+          <button id="modeReadonly" role="menuitem"><span class="mode-dot readonly" aria-hidden="true"></span><span class="mi-label">Read-only</span><span class="check" id="checkReadonly" style="display:none">✓</span>
+            <span class="desc">Review and analysis only — all editing is disabled, so it can't change any record, page, or file. Best for code review.</span>
+          </button>
+        </div>
+      </div>
+      <span id="activeModel" class="active-model" title="Active model — the model running your requests"></span>
+    </div>
 
   <div id="log"></div>
 
-  <!-- Pinned activity bar: sits BETWEEN the scrolling log and the composer, so a running
-       task (esp. long multi-agent runs) is ALWAYS visible without scrolling. Populated by
-       showSpinner()/hideSpinner(); hidden when idle. -->
+  <!-- Pinned progress (2026-09-14 redesign): current step + run time + Stop, driven by
+       showSpinner()/hideSpinner(); hidden when idle. Stop sends the same {type:"stop"} as the send button. -->
   <div id="procBar" class="proc-bar" hidden>
-    <span class="proc-spinner"></span>
+    <span class="proc-spinner" aria-hidden="true"></span>
     <span class="proc-status"></span>
-    <span class="proc-elapsed" style="opacity:.6"></span>
+    <span class="proc-elapsed" aria-hidden="true"></span>
+    <button id="procStop" class="proc-stop" type="button" title="Stop the run"><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><rect x="1" y="1" width="8" height="8" rx="1.5" fill="currentColor"></rect></svg>Stop</button>
   </div>
+  <div id="srAnnounce" class="sr-only" aria-live="polite" aria-atomic="true"></div>
 
   <footer>
     <div class="slash-menu" id="slashMenu"></div>
@@ -440,60 +486,40 @@
         <option value="2">2x</option>
       </select>
       <input id="lsTrigger" placeholder="trigger phrase, e.g. hey assistant" title="Participation trigger — leave empty to respond to direct questions" />
-      <button id="lsStop" title="Stop listening">■ Stop</button>
+      <button id="lsStop" title="Stop listening"><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><rect x="1" y="1" width="8" height="8" rx="1.5" fill="currentColor"></rect></svg>Stop</button>
     </div>
     <div class="chip-row" id="chipRow"></div>
     <div class="input-row">
       <div class="attach-wrap">
-        <button class="attach" id="attach" title="Attach — screenshot or image" aria-haspopup="menu" aria-expanded="false">+</button>
-        <div class="attach-menu" id="attachMenu">
-          <button id="menuShot">📷 Take a screenshot</button>
-          <button id="menuImage" title="Or just paste (Ctrl+V) — a Snipping Tool capture attaches automatically">🖼 Add an image (or paste)</button>
-          <button id="menuWorkflows">▶ Run a saved workflow</button>
-          <button id="menuSchedule">📅 Schedule a task<span class="desc">Save a prompt as a shortcut and run it on a schedule (once, daily, or weekly).</span></button>
-          <button id="menuLocalFiles">📁 Local files (MCP)<span class="desc">Connect a local folder so the agent can explore &amp; read it — incl. PDFs, Word/Excel/PowerPoint (text extracted) and images (vision-described) — organize it (create_folder / move_file / copy_file), and write with approval — like master-mind's Filesystem MCP.</span></button>
-          <button id="menuServiceNow">🔌 ServiceNow (MCP)<span class="desc">Connect one or more ServiceNow instances (URL + user + password, or paste CSV) so the agent can query real records, tables &amp; schema (sn_query_*).</span></button>
-          <button id="menuPromptBuilder">✍️ Prompt Builder<span class="desc">Describe a rough goal — get a well-written prompt tuned to this agent's actual tools (exact URLs, step budgets, verify criteria, sub-agent fan-out).</span></button>
-          <button id="menuConvLog">💾 Conversation log<span class="desc">Pick a folder (e.g. <local path> LLM TRAINING\conversations) — every run auto-saves the full conversation there as .md + .jsonl, including 👍/👎 feedback, to keep reinforcing the learning.</span></button>
+        <button class="attach" id="attach" title="Attach — screenshot or image" aria-label="Add screenshot, file or tool" aria-haspopup="menu" aria-expanded="false"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"></path></svg></button>
+        <div class="attach-menu" id="attachMenu" role="menu" aria-label="Add to this task">
+          <button id="menuShot" role="menuitem"><svg class="mi-ico" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="12" height="9" rx="1.5"></rect><circle cx="8" cy="8.5" r="2.3"></circle><path d="M5.5 4l1-1.5h3l1 1.5"></path></svg><span class="mi-label">Take a screenshot</span></button>
+          <button id="menuImage" role="menuitem" title="Or just paste (Ctrl+V) — a Snipping Tool capture attaches automatically"><svg class="mi-ico" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="1.5"></rect><circle cx="6" cy="6.5" r="1.2"></circle><path d="M14 10.5l-3.2-3.2L4 13"></path></svg><span class="mi-label">Add an image (or paste)</span></button>
+          <button id="menuWorkflows" role="menuitem"><svg class="mi-ico" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M5 3.5l7 4.5-7 4.5z"></path></svg><span class="mi-label">Run a saved workflow</span></button>
+          <button id="menuSchedule" role="menuitem"><svg class="mi-ico" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><rect x="2.5" y="3.5" width="11" height="10" rx="1.5"></rect><path d="M2.5 6.5h11M5.5 2v3M10.5 2v3"></path></svg><span class="mi-label">Schedule a task</span><span class="desc">Save a prompt as a shortcut and run it on a schedule (once, daily, or weekly).</span></button>
+          <button id="menuLocalFiles" role="menuitem"><svg class="mi-ico" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h3l1.5 1.5h4.5A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z"></path></svg><span class="mi-label">Local files (MCP)</span><span class="desc">Connect a local folder so the agent can explore &amp; read it — incl. PDFs, Word/Excel/PowerPoint (text extracted) and images (vision-described) — organize it (create_folder / move_file / copy_file), and write with approval — like master-mind's Filesystem MCP.</span></button>
+          <button id="menuServiceNow" role="menuitem"><svg class="mi-ico" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M6 2v3M10 2v3"></path><path d="M4 5h8v2.5a4 4 0 0 1-8 0z"></path><path d="M8 11.5V14"></path></svg><span class="mi-label">ServiceNow (MCP)</span><span class="desc">Connect one or more ServiceNow instances (URL + user + password, or paste CSV) so the agent can query real records, tables &amp; schema (sn_query_*).</span></button>
+          <button id="menuPromptBuilder" role="menuitem"><svg class="mi-ico" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 2.5l2.5 2.5L6 12.5 3 13l.5-3z"></path></svg><span class="mi-label">Prompt Builder</span><span class="desc">Describe a rough goal — get a well-written prompt tuned to this agent's actual tools (exact URLs, step budgets, verify criteria, sub-agent fan-out).</span></button>
+          <button id="menuConvLog" role="menuitem"><svg class="mi-ico" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M3 2.5h8l2 2v9H3z"></path><path d="M5.5 2.5v3h5v-3M5.5 13.5v-4h5v4"></path></svg><span class="mi-label">Conversation log</span><span class="desc">Pick a folder (e.g. C:\redacted\path) — every run auto-saves the full conversation there as .md + .jsonl, including 👍/👎 feedback, to keep reinforcing the learning.</span></button>
         </div>
       </div>
-      <button class="teach" id="teach" title="Teach a workflow — record your actions &amp; narration; the agent learns to repeat it">🎬</button>
-      <button class="teach" id="mic" title="Voice input — dictate into the prompt (local Whisper)">🎤</button>
+      <button class="teach" id="teach" title="Teach a workflow — record your actions &amp; narration; the agent learns to repeat it" aria-label="Teach a workflow"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="8" cy="8" r="5.8"></circle><circle cx="8" cy="8" r="2.4" fill="currentColor"></circle></svg></button>
+      <button class="teach" id="mic" title="Voice input — dictate into the prompt (local Whisper)" aria-label="Voice input"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><rect x="5.8" y="1.8" width="4.4" height="7.6" rx="2.2"></rect><path d="M3.4 7.6a4.6 4.6 0 0 0 9.2 0M8 12.2v2"></path></svg></button>
       <div class="attach-wrap">
-        <button class="teach" id="listenBtn" title="Listen to a meeting or conversation — live transcript + active participation" aria-haspopup="menu" aria-expanded="false">🎧</button>
-        <div class="attach-menu" id="listenMenu">
-          <button id="listenTab">🖥 Meeting audio<span class="desc">Capture the meeting's audio (Teams / Meet / Zoom — web tab or native app via "share system audio") and transcribe it live — 100% local (Whisper).</span></button>
-          <button id="listenMic">🎤 Microphone<span class="desc">Listen to the room / an in-person conversation through your mic.</span></button>
-          <button id="listenBoth">🖥+🎤 Both<span class="desc">Tab audio + mic together — transcript labels who said what by source.</span></button>
+        <button class="teach" id="listenBtn" title="Listen to a meeting or conversation — live transcript + active participation" aria-label="Listen to a meeting" aria-haspopup="menu" aria-expanded="false"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M3 9.5V8a5 5 0 0 1 10 0v1.5"></path><rect x="2.2" y="9" width="3" height="4.6" rx="1"></rect><rect x="10.8" y="9" width="3" height="4.6" rx="1"></rect></svg></button>
+        <div class="attach-menu" id="listenMenu" role="menu" aria-label="Listen">
+          <button id="listenTab" role="menuitem"><svg class="mi-ico" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><rect x="2" y="3" width="12" height="8" rx="1.5"></rect><path d="M6 14h4M8 11v3"></path></svg><span class="mi-label">Meeting audio</span><span class="desc">Capture the meeting's audio (Teams / Meet / Zoom — web tab or native app via "share system audio") and transcribe it live — 100% local (Whisper).</span></button>
+          <button id="listenMic" role="menuitem"><svg class="mi-ico" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><rect x="5.8" y="1.8" width="4.4" height="7.6" rx="2.2"></rect><path d="M3.4 7.6a4.6 4.6 0 0 0 9.2 0M8 12.2v2"></path></svg><span class="mi-label">Microphone</span><span class="desc">Listen to the room / an in-person conversation through your mic.</span></button>
+          <button id="listenBoth" role="menuitem"><svg class="mi-ico" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M3 9.5V8a5 5 0 0 1 10 0v1.5"></path><rect x="2.2" y="9" width="3" height="4.6" rx="1"></rect><rect x="10.8" y="9" width="3" height="4.6" rx="1"></rect></svg><span class="mi-label">Both</span><span class="desc">Tab audio + mic together — transcript labels who said what by source.</span></button>
         </div>
       </div>
       <div class="input-wrap">
         <textarea id="input" placeholder="e.g. Summarize this page  ·  Screenshot it and read the chart  ·  Find the login button and click it" rows="2"></textarea>
-        <button class="clear-input" id="clearInput" title="Clear prompt (Esc)">✕</button>
+        <button class="clear-input" id="clearInput" title="Clear prompt (Esc)" aria-label="Clear prompt"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M2 2l6 6M8 2L2 8"></path></svg></button>
       </div>
       <button class="send" id="send" aria-label="Send" title="Send">↑</button>
     </div>
     <input type="file" id="filePick" accept="image/*" multiple style="display:none" />
-    <div class="mode-row">
-      <div class="attach-wrap">
-        <button class="modebtn" id="modeBtn" aria-haspopup="menu" aria-expanded="false">📋 Plan first ▾</button>
-        <div class="attach-menu" id="modeMenu">
-          <button id="modePlan">📋 Plan first<span class="check" id="checkPlan">✓</span>
-            <span class="desc">Drafts a step-by-step plan and waits for your approval before doing anything.</span>
-          </button>
-          <button id="modeAsk">✋ Ask before acting<span class="check" id="checkAsk" style="display:none">✓</span>
-            <span class="desc">Pauses for your approval before each action — clicking, typing, navigating, or making changes.</span>
-          </button>
-          <button id="modeAuto">▶▶ Act without asking<span class="check" id="checkAuto" style="display:none">✓</span>
-            <span class="desc">Acts on its own without pausing for approval — the Stop button still halts it.</span>
-          </button>
-          <button id="modeReadonly">🔒 Read-only<span class="check" id="checkReadonly" style="display:none">✓</span>
-            <span class="desc">Review and analysis only — all editing is disabled, so it can't change any record, page, or file. Best for code review.</span>
-          </button>
-        </div>
-      </div>
-      <span id="activeModel" class="active-model" title="Active model — the model running your requests"></span>
-    </div>
     <!-- Usage tips moved into ⚙ Settings → "Tips & keyboard shortcuts" to keep the composer clean. -->
   </footer>
 
@@ -552,6 +578,7 @@
         <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
           <button class="btn-secondary" id="pbAttach" title="Attach images (vision-described) or text files (content quoted) as extra context — max 5">📎 Attach files</button>
           <span class="note" style="font-size:11px">images vision-described · text quoted · max 5</span>
+      <span class="note" style="font-size:11px;color:var(--accent-green, #4EC9B0)" title="Generating a prompt is free and capped at 20 an hour. Each attached image is described first and costs the vision rate.">✓ Generate is free · images cost the vision rate</span>
           <span id="pbVision" class="pb-model" hidden></span>
         </div>
         <div id="pbFiles" style="display:flex;flex-wrap:wrap;gap:5px;margin-top:4px"></div>

@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en" data-product="go">
+<head>
+  <meta charset="utf-8" />
+  <script src="theme-boot.js"></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Agent Go — Welcome</title>
+  <link rel="stylesheet" href="theme.css" />
+  <!-- First-run setup (design refresh 2026-09-14). Opened once by background.js on a fresh install. -->
+  <style>
+    body.welcome-page { margin: 0; min-height: 100vh; box-sizing: border-box; background: var(--bg); color: var(--text); font: 400 14px/1.5 var(--font-ui); display: flex; align-items: center; justify-content: center; padding-block: 40px; padding-inline: 16px; }
+    .ob { width: 100%; max-width: 620px; display: flex; flex-direction: column; gap: 20px; }
+    .ob-top { display: flex; align-items: center; gap: 10px; }
+    .ob-dots { display: flex; gap: 6px; flex: 1; }
+    .ob-dot { width: 7px; height: 7px; border-radius: 999px; background: var(--line); transition: all .18s ease; }
+    .ob-dot.on { background: var(--accent); }
+    .ob-dot.cur { width: 22px; }
+    .ob-count { font: 400 10.5px/1 var(--font-mono); color: var(--faint); }
+    .ob-skip { border: 0; background: transparent; font: 400 11.5px/1 var(--font-ui); color: var(--faint); padding: 4px; cursor: pointer; }
+    .ob-skip:hover { color: var(--text); }
+    .ob-card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 30px; display: flex; flex-direction: column; gap: 18px; box-shadow: 0 8px 28px var(--shadow); min-width: 0; }
+    .ob-head { display: flex; flex-direction: column; gap: 9px; }
+    .ob-kicker { font: 400 10.5px/1 var(--font-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--accent); }
+    .ob-card h1 { margin: 0; font: 600 24px/1.2 var(--font-ui); letter-spacing: -.018em; text-wrap: balance; outline: none; }
+    .ob-head p { margin: 0; font: 400 13.5px/1.6 var(--font-ui); color: var(--muted); max-width: 52ch; }
+    #obBox { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+    .ob-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+    .ob-promise { background: var(--raised); border: 1px solid var(--line2); border-radius: 10px; padding: 13px; display: flex; flex-direction: column; gap: 5px; }
+    .ob-glyph { font: 400 13px/1 var(--font-mono); color: var(--accent); }
+    .ob-ptitle { font: 500 12.5px/1.25 var(--font-ui); }
+    .ob-sub { font: 400 11.5px/1.45 var(--font-ui); color: var(--muted); }
+    .ob-list { display: flex; flex-direction: column; gap: 9px; }
+    .ob-list.scroll { max-height: 330px; overflow-y: auto; padding-right: 4px; }
+    .ob-choice, .ob-try { display: flex; align-items: center; gap: 12px; width: 100%; box-sizing: border-box; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--text); text-align: left; cursor: pointer; font: inherit; }
+    .ob-choice:hover { border-color: var(--accentLine); }
+    .ob-choice:disabled { opacity: .5; cursor: not-allowed; }
+    .ob-choice[aria-checked="true"] { border-color: var(--accent); background: var(--accentSoft); }
+    .ob-radio { width: 14px; height: 14px; flex: none; box-sizing: border-box; border-radius: 50%; border: 1.5px solid var(--line); background: var(--surface); }
+    .ob-choice[aria-checked="true"] .ob-radio { border: 4px solid var(--accent); }
+    .ob-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+    .ob-name { font: 500 13px/1.25 var(--font-ui); overflow-wrap: anywhere; }
+    .ob-mono { font-family: var(--font-mono); font-weight: 400; font-size: 12.5px; }
+    .ob-meta { font: 400 10.5px/1 var(--font-mono); color: var(--faint); flex: none; }
+    .ob-try:hover { border-color: var(--accentLine); background: var(--accentSoft); }
+    .ob-slug { font: 400 11.5px/1 var(--font-mono); color: var(--accent); flex: none; min-width: 42px; }
+    .ob-arrow { color: var(--faint); font-size: 12px; }
+    .ob-label { font: 400 10.5px/1 var(--font-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--faint); margin: 6px 0 0; }
+    .ob-label.plain { text-transform: none; letter-spacing: 0; }
+    .ob-rows { border: 1px solid var(--line); border-radius: 10px; padding: 4px 14px; }
+    .ob-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 11px 0; border-bottom: 1px solid var(--line2); }
+    .ob-row:last-child { border-bottom: 0; }
+    .ob-rowname { font: 500 12.5px/1.3 var(--font-ui); }
+    .ob-switch { width: 38px; height: 22px; flex: none; box-sizing: border-box; border-radius: 999px; border: 1px solid var(--line); background: var(--raised); padding: 2px; display: flex; align-items: center; justify-content: flex-start; cursor: pointer; transition: all .16s ease; }
+    .ob-switch::after { content: ""; width: 16px; height: 16px; border-radius: 50%; background: var(--faint); transition: all .16s ease; }
+    .ob-switch:disabled { opacity: .5; cursor: not-allowed; }
+    .ob-switch[aria-checked="true"] { background: var(--accent); border-color: var(--accent); justify-content: flex-end; }
+    .ob-switch[aria-checked="true"]::after { background: var(--onAccent); }
+    .ob-note { margin: 0; font: 400 12.5px/1.5 var(--font-ui); color: var(--muted); }
+    .ob-inline { display: flex; gap: 8px; flex-wrap: wrap; }
+    .ob-btn, .ob-back { padding: 9px 14px; border-radius: 9px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: 400 13px/1 var(--font-ui); cursor: pointer; }
+    .ob-btn:hover, .ob-back:hover { border-color: var(--accentLine); }
+    .ob-status { margin: 0; font: 400 11.5px/1.45 var(--font-mono); color: var(--muted); }
+    .ob-status:empty { display: none; }
+    .ob-actions { display: flex; gap: 9px; align-items: center; padding-top: 2px; }
+    .ob-grow { flex: 1; }
+    .ob-next { padding: 10px 18px; border-radius: 9px; border: 1px solid var(--accent); background: var(--accent); color: var(--onAccent); font: 500 13px/1 var(--font-ui); cursor: pointer; }
+    .ob-next:hover { filter: brightness(1.08); }
+    .welcome-page button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    @media (prefers-reduced-motion: reduce) { .ob-dot, .ob-switch, .ob-switch::after { transition: none; } }
+    @media (max-width: 480px) { .ob-card { padding: 20px; } .ob-card h1 { font-size: 20px; } }
+  </style>
+</head>
+<body class="welcome-page">
+  <main class="ob" aria-labelledby="obTitle">
+    <div class="ob-top">
+      <div class="ob-dots" id="obDots" aria-hidden="true"></div>
+      <span class="ob-count" id="obCount"></span>
+      <button class="ob-skip" id="obSkip" type="button">Skip</button>
+    </div>
+    <section class="ob-card">
+      <div class="ob-head">
+        <span class="ob-kicker" id="obKicker"></span>
+        <h1 id="obTitle" tabindex="-1"></h1>
+        <p id="obBody"></p>
+      </div>
+      <div id="obBox"></div>
+      <p class="ob-status" id="obStatus" role="status" aria-live="polite"></p>
+      <div class="ob-actions">
+        <button type="button" class="ob-back" id="obBack">Back</button>
+        <span class="ob-grow"></span>
+        <button type="button" class="ob-next" id="obNext">Continue</button>
+      </div>
+    </section>
+  </main>
+  <script src="welcome.js" type="module"></script>
+</body>
+</html>

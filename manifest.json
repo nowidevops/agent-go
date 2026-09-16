@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1GUsMGfQ/0z7k5sB6deMx+i+ULtk0lRDeVfJcquVRAE2Hp5S+OWMqf3pHeuZzRo/2NmdUHYKKmMEwy7qiwqPK4z4vqIfDGl1KdE5SmaF+cA6FIPjt0YHwJrlXHO1IWZC310SWPjwWdcWPtb9v7g1kcn5NjnBLo34jIJ8SH6HDW1x14HqzPryMvh1bQwT7FIWMCF8b2xID64zZK+xk6yaImH2r7Xx8w39mpdDKw6qOjuZFtbIgLnC0GSzxeM9oounBPmP8lu91xEWViOaf97aSTuMrvUEWjKRNcXdAcAV9fqLYJamrL5ApfCaIRkJ5LbQ0tTh8O1pB2RZ92Eoz0HnIwIDAQAB",
   "name": "Agent Go",
-  "version": "0.2.6",
+  "version": "0.2.22",
   "description": "Browser agent for ServiceNow and everyday web work: reads the page, sees screenshots, calls tools, and acts. Inference runs on your Agentic Copilot account; no local model, no API key.",
   "permissions": [
     "activeTab",

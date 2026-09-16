@@ -136,5 +136,5 @@ export async function scheduleUpdateChecks(backendUrl) {
 
 /** Plain-English instructions, shared by both pages (kept in step with INSTALL.md "Updating"). */
 export function updateSteps() {
-  return "Download the new zip, empty the folder you installed from, unzip the new files into that same folder, then reload Agent Go on chrome://extensions. Your sign-in, settings and shortcuts are kept. If the Agent Go card on chrome://extensions shows an ID other than igpadcnljdbbhklmgemlflnodnoihheb, follow the one-time exception in INSTALL.md instead (Remove, then Load unpacked).";
+  return "Download the new zip, empty the folder you installed from, unzip the new files into that same folder, then reload Agent Go on chrome://extensions. Your sign-in, settings and shortcuts are kept. If the Agent Go card on chrome://extensions shows an ID other than igpadcnljdbbhklmgemlflnodnoihheb, follow the one-time exception in INSTALL.md instead (Remove, then Load unpacked). Do NOT click Remove — removing the extension deletes your / shortcuts, schedules and settings from Chrome. To be safe, export your shortcuts in Settings before updating.";
 }

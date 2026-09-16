@@ -8,7 +8,8 @@ import { isM1ReadOnlyRoute, isM1DashboardUrl } from "./m1-pack.js";
 import { addLesson } from "./learning.js";
 import { snQueryTable, snQueryRecord, snQuerySchema, snFetchScriptByName, snFetchScriptBySysId, snWorkflowActivityVars, snWorkflowActivitySet, snWorkflowDeleteActivity, snWorkflowFixScript, snWorkflowPublish, snSearchScriptBody, snWriteRecord, snRecentChanges, snCompareRecord, resolveSnTarget, resolveSnTargetByInstance, listSnInstances, getSnConnections, ARTIFACT_TYPES } from "./sn-tools.js";
 import { readConsoleTap, readNetLog } from "./diagnostics.js";
-import { extractDocumentText, looksLikePdf, pdfUrlFromViewer } from "./extract.js";
+import { extractDocumentText, looksLikePdf, pdfUrlFromViewer, classifyPdfRef } from "./extract.js";
+import { SHORTCUT_TOOLS, SHORTCUT_TOOL_NAMES, runShortcutTool } from "./shortcut-tool.js";
 
 // Strip a fetched HTML document down to readable text (scripts/styles/markup
 // removed, entities decoded, whitespace collapsed) for fetch_page. Deliberately
@@ -39,10 +40,11 @@ export const TOOLS = [
     type: "function",
     function: {
       name: "read_page",
-      description: "Read the active tab: returns its title, URL, and visible text content. Use this before answering questions about the current page.",
+      description: "Read a web page: returns its title, URL, and visible text content. With no `url` it reads the ACTIVE tab. Give `url` to read a specific page — it navigates the tab there first, waits for the load, then reads. Reading several pages means one call PER page, ONE AT A TIME (wait for each result before the next); they share a single tab, so issuing them together makes the later ones read the wrong page.",
       parameters: {
         type: "object",
         properties: {
+          url: { type: "string", description: "Optional. The page to open and read (http:// or https://). Omit to read whatever the active tab is already showing." },
           max_chars: { type: "integer", description: "Maximum characters of page text to return (default 6000)." }
         }
       }
@@ -52,7 +54,7 @@ export const TOOLS = [
     type: "function",
     function: {
       name: "sn_api_reference",
-      description: "Look up the OFFICIAL ServiceNow API Reference (<local path> — the vendor's authoritative API documentation) ON DEMAND, in any phase. Use it whenever you are unsure how a ServiceNow API method, class, table field, or event actually behaves — a method signature, whether a method exists, valid event names, a GlideRecord/GlideAjax/RESTMessageV2/g_form usage, etc. Pass a free-text `query` naming the API/method/class/table/event (e.g. 'GlideAggregate', 'g_form.getReference', 'RESTMessageV2', 'business rule current.update') or an artifact type. It returns authoritative reference text that OVERRIDES your training memory — prefer it over recollection and cite it when asserting how an API behaves. Use query 'index' to see which references are available. This is a READ-ONLY reference lookup; it does not touch the instance.",
+      description: "Look up the OFFICIAL ServiceNow API Reference (C:\\redacted\\path's authoritative API documentation) ON DEMAND, in any phase. Use it whenever you are unsure how a ServiceNow API method, class, table field, or event actually behaves — a method signature, whether a method exists, valid event names, a GlideRecord/GlideAjax/RESTMessageV2/g_form usage, etc. Pass a free-text `query` naming the API/method/class/table/event (e.g. 'GlideAggregate', 'g_form.getReference', 'RESTMessageV2', 'business rule current.update') or an artifact type. It returns authoritative reference text that OVERRIDES your training memory — prefer it over recollection and cite it when asserting how an API behaves. Use query 'index' to see which references are available. This is a READ-ONLY reference lookup; it does not touch the instance.",
       parameters: {
         type: "object",
         properties: {
@@ -590,7 +592,7 @@ export const TOOLS = [
     type: "function",
     function: {
       name: "read_file",
-      description: "Read a file from the user's connected LOCAL folder (Filesystem MCP, read-only). Reads text/code files as-is, EXTRACTS the text from binary documents (.pdf, .docx, .xlsx, .pptx, .rtf — up to 25MB), and DESCRIBES image files (.png/.jpg/.webp/.gif/.bmp) via the vision model — so you CAN read PDFs, Word/Excel/PowerPoint files, and images; never claim otherwise. Only works if a folder is connected via '📁 Local files (MCP)'. The path is RELATIVE to the connected root (e.g. 'src/index.js' or 'Invoices/Invoice_97.pdf'). For large files use start_line/end_line (text: max 1MB; 200K chars/response). Sensitive files (.env, keys) stay blocked. If a PDF comes back with no/garbled text (scanned, or an undecodable font), call read_pdf with the file's FULL local path instead — the desktop-server reads it with PyMuPDF + Tesseract OCR.",
+      description: "Read a file from the user's connected LOCAL folder (Filesystem MCP, read-only). Reads text/code files as-is, EXTRACTS the text from binary documents (.pdf, .docx, .xlsx, .pptx, .rtf — up to 25MB), and DESCRIBES image files (.png/.jpg/.webp/.gif/.bmp) via the vision model — so you CAN read PDFs, Word/Excel/PowerPoint files, and images; never claim otherwise. Only works if a folder is connected via '📁 Local files (MCP)'. The path is RELATIVE to the connected root (e.g. 'src/index.js' or 'Invoices/Invoice_97.pdf'). For large files use start_line/end_line (text: max 1MB; 200K chars/response). Sensitive files (.env, keys) stay blocked. A PDF with no usable text layer (scanned, or an undecodable font) is AUTOMATICALLY handed to the desktop-server (PyMuPDF + Tesseract OCR) — one read_file call is enough; if that fallback fails the result says why (usually the desktop-server is not running — tell the user in one line, do not retry).",
       parameters: {
         type: "object",
         properties: {
@@ -766,11 +768,11 @@ export const TOOLS = [
     type: "function",
     function: {
       name: "read_pdf",
-      description: "Read a PDF and return its REAL text. Works on (1) a web URL: direct https://…​.pdf, or the chrome-extension://… viewer URL of the current PDF tab (unwrapped automatically); and (2) a LOCAL FILE: pass the absolute path (e.g. <local path> Files\\report.pdf or file:///F:/…) — the desktop-server extracts it with PyMuPDF and automatically OCRs scanned pages with Tesseract, so even image-only local PDFs return exact text (needs the desktop-server running). PREFER this over scrolling+screenshotting a PDF preview (email attachments: download or use the saved copy, then read_pdf its local path — ONE call replaces dozens of screenshots), and use it when read_file returns garbled/unreadable PDF content. Read-only.",
+      description: "Read a PDF and return its REAL text. Works on (1) a web URL: direct https://…​.pdf, or the chrome-extension://… viewer URL of the current PDF tab (unwrapped automatically); (2) a LOCAL FILE by absolute path (C:\redacted\path); and (3) a file in a connected 📁 Local files (MCP) folder by its RELATIVE path exactly as list_files shows it (e.g. 'Records/scan.pdf') — for (2) and (3) the desktop-server extracts the text with PyMuPDF and automatically OCRs scanned pages with Tesseract, so even image-only PDFs return exact text (needs the desktop-server running). PREFER this over scrolling+screenshotting a PDF preview (email attachments: download or use the saved copy, then read_pdf its local path — ONE call replaces dozens of screenshots), and use it when read_file returns garbled/unreadable PDF content. Read-only.",
       parameters: {
         type: "object",
         properties: {
-          url: { type: "string", description: "The PDF URL — a direct https://…​.pdf, or a chrome-extension://…/https://…​.pdf viewer URL." },
+          url: { type: "string", description: "The PDF to read: a direct https://…​.pdf, a chrome-extension://…/https://…​.pdf viewer URL, an ABSOLUTE local path (C:\\redacted\\path), or a path RELATIVE to a connected 📁 Local files (MCP) folder (Records/scan.pdf)." },
           max_chars: { type: "integer", description: "Max characters of text to return (default 12000)." }
         },
         required: ["url"]
@@ -1113,7 +1115,7 @@ export const TOOLS = [
     type: "function",
     function: {
       name: "set_session_max_loss",
-      description: "Day-trading RISK POSTURE (TIGHTEN-ONLY): lower TODAY's session max-loss cap based on market insights (elevated VIX, choppy tape, losing morning). Server-enforced guardrails: the cap can NEVER loosen past the operator's dashboard ceiling (403), floor is $100 (a tighter cap is a de facto halt — recommend the operator halt instead), max 3 material changes/day with 5 minutes between changes, every change is audited, and the cap auto-expires at the ET session boundary. You have NO access to the hard BLOCK/FLATTEN ladder or stage selection. Only works while on the Day Trading page. Always include a concrete market-insight rationale.",
+      description: "Day-trading RISK POSTURE (TIGHTEN-ONLY): lower TODAY's session max-loss cap based on market insights (elevated VIX, choppy tape, losing morning). Server-enforced guardrails: the cap can NEVER loosen past the operator's dashboard ceiling (403), floor is $100 (a tighter cap is a de facto halt — recommend the operator halt instead), max 3 material changes/day with 5 minutes between changes, every change is audited, and the cap auto-expires at the ET session boundary. You have NO access to the hard BLOCK/FLATTEN ladder or stage selection. Only works while on the Day Trading page OR the Live Trading page — targets whichever module owns the active page. Always include a concrete market-insight rationale.",
       parameters: {
         type: "object",
         properties: {
@@ -1265,7 +1267,8 @@ export const TOOLS = [
         required: ["amount"]
       }
     }
-  }
+  },
+  ...SHORTCUT_TOOLS
 ];
 
 // Desktop-control tool names (used for gating: hidden when the toggle is off,
@@ -1483,16 +1486,19 @@ function snFormDriver(tabId) {
 // never silently assumes an OS action succeeded.
 // ---------------------------------------------------------------------------
 const DESKTOP_TIMEOUT_MS = 20000;
-async function desktopBridge(settings, path, body, timeoutMs) {
+// `method` (2026-09-07c): the server's /health route is GET-only, and the bridge
+// always POSTed, so desktop_get_screen_size had answered "HTTP 405" since day one
+// (owner export 17:56). Everything else on the server is POST.
+async function desktopBridge(settings, path, body, timeoutMs, method = "POST") {
   const base = String(settings?.desktopUrl || "http://localhost:8777").replace(/\/+$/, "");
   const headers = { "Content-Type": "application/json" };
   if (settings?.desktopToken) headers["X-Desktop-Token"] = String(settings.desktopToken);
   let res;
   try {
     res = await fetch(`${base}${path}`, {
-      method: "POST",
+      method,
       headers,
-      body: JSON.stringify(body || {}),
+      body: method === "GET" ? undefined : JSON.stringify(body || {}),
       // /exec waits for the command to finish — give it the command's own timeout
       // plus 15s bridge overhead, so a 120s test run isn't cut off at 20s.
       signal: AbortSignal.timeout(timeoutMs || DESKTOP_TIMEOUT_MS)
@@ -1510,6 +1516,52 @@ async function desktopBridge(settings, path, body, timeoutMs) {
     return { error: `Desktop control error: ${msg}` };
   }
   return data || { error: "Desktop control returned an empty response." };
+}
+
+// Local PDF → desktop-server /pdftext (PyMuPDF text layer + Tesseract OCR for
+// scanned pages). Two source shapes (2026-09-07c): {path} for an ABSOLUTE local
+// path, or {base64, name} for bytes the side panel pulled out of a connected
+// 📁 Local files (MCP) folder — the File System Access API never reveals that
+// folder's disk path, so bytes are the only way its PDFs reach the OCR engine.
+// Returns the model-facing result, or {error}.
+async function desktopPdfText(settings, src, maxChars) {
+  const body = { max_chars: Number.isFinite(maxChars) ? Math.max(1000, maxChars) : undefined };
+  if (src.base64) { body.data_b64 = src.base64; body.name = src.name || "document.pdf"; }
+  else body.path = src.path;
+  const r = await desktopBridge(settings, "/pdftext", body, src.base64 ? 180000 : 120000);
+  if (r.error) {
+    // A 404 means the RUNNING desktop-server predates /pdftext (live conv
+    // 2026-07-23: the model got a bare "HTTP 404" and went flailing).
+    if (/HTTP 404/.test(r.error)) {
+      return { error: "read_pdf (local file): the desktop-server that is running is an OLD build without the /pdftext endpoint. Tell the user to RESTART it (close the 'Local Desktop Control Server' window, run desktop-server\\start-desktop.bat), then retry this same call. Meanwhile you can read the PDF via run_command with a ONE-LINE python: python -u -c \"import fitz; print(fitz.open(r'<path>').get_page_text(0))\"" };
+    }
+    // An OLD desktop-server caps request bodies at 8 MB (HTTP 413, non-JSON body): a
+    // bytes upload of a scanned PDF is the first thing that ever exceeded it.
+    if (src.base64 && /HTTP 413/.test(r.error)) {
+      return { error: `read_pdf (connected folder): "${src.name}" is larger than the running desktop-server accepts in one upload (an OLD build caps requests at 8 MB; the current build takes 40 MB). Tell the user in one line to RESTART the desktop-server (close the 'Local Desktop Control Server' window, run desktop-server\\start-desktop.bat) and retry ONCE after that; or pass read_pdf the file's FULL absolute path instead. Do NOT retry this call as-is.` };
+    }
+    // An older /pdftext knows only {path}: it answers "path required" to a bytes upload.
+    if (src.base64 && /path required/i.test(r.error)) {
+      return { error: `read_pdf (connected folder): the running desktop-server is an OLD build that reads PDFs only by absolute path, so "${src.name}" from the connected folder cannot be OCR'd until the user RESTARTS it (close the 'Local Desktop Control Server' window, run desktop-server\\start-desktop.bat). Tell the user that in one line. Until then the only way to read this file is read_pdf with its FULL absolute path (ask the user for the folder's disk path if you do not know it) — do NOT retry this call as-is.` };
+    }
+    return { error: `read_pdf (${src.base64 ? "connected folder" : "local file"}): ${r.error}` };
+  }
+  if (!r.ok) return { error: `read_pdf (${src.base64 ? "connected folder" : "local file"}): ${r.error || "extraction failed"}` };
+  // MM 2026-09-07c P3: a server that answers ok:true without `text` must yield the
+  // curated restart message, not a TypeError from `.length`.
+  const txt = typeof r.text === "string" ? r.text : "";
+  if (!txt) return { error: `read_pdf (${src.base64 ? "connected folder" : "local file"}): the desktop-server returned no text for this PDF. Tell the user to RESTART it (desktop-server\\start-desktop.bat) and retry ONCE after that.` };
+  const cap = Number.isFinite(maxChars) ? maxChars : 12000;
+  const over = txt.length > cap;
+  return {
+    path: src.base64 ? (src.display || src.name) : r.path, format: "pdf", pages: r.pages, chars: r.chars,
+    ocr_pages: r.ocr_pages && r.ocr_pages.length ? r.ocr_pages : undefined,
+    text: over
+      ? txt.slice(0, cap) + `\n…[truncated at ${cap} of ${txt.length} chars — re-call ONCE with max_chars: ${txt.length + 1000} to get the WHOLE document]`
+      : txt,
+    truncated: over || r.truncated,
+    note: over ? undefined : "COMPLETE document — you now have every page; extract what you need from this text, do NOT re-read it (no more read_pdf calls, no python page dumps)."
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1557,28 +1609,97 @@ function parseDdgHtml(html) {
   return out;
 }
 
+// DuckDuckGo "lite" is a second, separately rate-limited no-JS endpoint (table layout:
+// <a class='result-link' href=//duckduckgo.com/l/?uddg=...>title</a> + <td class='result-snippet'>).
+function parseDdgLite(html) {
+  const out = [];
+  // The page is several tables (search form, results, footer); anything after the LAST
+  // </table> is footer/ads. (The first </table> is the form: bounding there returned nothing.)
+  const full = String(html);
+  const tEnd = full.toLowerCase().lastIndexOf("</table>");
+  const src = tEnd >= 0 ? full.slice(0, tEnd) : full;
+  // attribute order varies (href before class in the live page), so match every anchor
+  // and keep the ones classed result-link; the snippet is the next result-snippet cell.
+  const re = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
+  let m;
+  while ((m = re.exec(src))) {
+    const attrs = m[1];
+    if (!/class=['"]result-link['"]/i.test(attrs)) continue;
+    const hrefM = attrs.match(/href=(?:['"]([^'"]*)['"]|([^\s>]+))/i); // quoted or bare (09l)
+    const title = decodeEntities(m[2]);
+    const url = ddgRealUrl(hrefM ? (hrefM[1] || hrefM[2] || "") : "");
+    if (!title || !url) continue; // an item without a url is not citable: hand over rather than serve it
+    const rest = src.slice(re.lastIndex);
+    const nextA = rest.search(/<a\b[^>]*class=['"]result-link['"]/i);
+    const scope = nextA >= 0 ? rest.slice(0, nextA) : rest;
+    const snipM = scope.match(/class=['"]result-snippet['"][^>]*>([\s\S]*?)<\/td>/i);
+    out.push({ title: title.slice(0, 200), url, snippet: snipM ? decodeEntities(snipM[1]).slice(0, 400) : "" });
+  }
+  return out;
+}
+
+// Bing's RSS view of a query: <item><title/><link/><description/></item>. Plain XML, no
+// consent wall, no JS. (Microsoft's feed copyright limits it to personal, non-commercial
+// rendering; it is the LAST resort here, after both DuckDuckGo endpoints.)
+function parseBingRss(xml) {
+  const out = [];
+  const re = /<item>([\s\S]*?)<\/item>/gi;
+  let m;
+  while ((m = re.exec(String(xml)))) {
+    const item = m[1].replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, (_, inner) => inner); // 09l: unwrap CDATA; decodeEntities then strips any inline tags and decodes entities
+    const t = item.match(/<title>([\s\S]*?)<\/title>/i);
+    const l = item.match(/<link>([\s\S]*?)<\/link>/i);
+    const d = item.match(/<description>([\s\S]*?)<\/description>/i);
+    const title = t ? decodeEntities(t[1]) : "";
+    const url = l ? decodeEntities(l[1]) : "";
+    if (!title || !/^https?:\/\//i.test(url)) continue;
+    out.push({ title: title.slice(0, 200), url, snippet: d ? decodeEntities(d[1]).slice(0, 400) : "" });
+  }
+  return out;
+}
+
+// 09i: three backends in ONE call. Every v2 recording take saw DuckDuckGo rate-limit and
+// Google bot-check back to back, and the agent was left to guess a URL. Order: DDG html
+// (best snippets), DDG lite (separate limit), Bing RSS (last resort). A backend that
+// errors or parses to nothing hands over to the next; the answer says which one served.
+// 09l: each backend gets its own deadline (fetch + body), so a stalled engine hands over
+// instead of hanging the run; the executor's own race covers only the user's Stop.
+const WEB_SEARCH_OPTS = { timeoutMs: 10000 };
+const WEB_SEARCH_BACKENDS = [
+  { name: "duckduckgo", url: (q) => `https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`, parse: parseDdgHtml },
+  { name: "duckduckgo-lite", url: (q) => `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(q)}`, parse: parseDdgLite },
+  { name: "bing-rss", url: (q) => `https://www.bing.com/search?q=${encodeURIComponent(q)}&format=rss`, parse: parseBingRss },
+];
+
 async function webSearch(query, limit) {
   const q = String(query || "").trim();
   if (!q) return { error: "web_search requires a non-empty query." };
   const n = Math.min(10, Math.max(1, Number(limit) || 6));
-  const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`;
-  let html;
-  try {
-    const res = await fetch(url, { credentials: "omit", redirect: "follow" });
-    if (!res.ok) return { error: `web_search: DuckDuckGo returned HTTP ${res.status}. Try again or rephrase the query — do NOT fabricate an answer.` };
-    html = await res.text();
-  } catch (e) {
-    return { error: `web_search could not reach DuckDuckGo: ${e.message}. Do NOT fabricate an answer; tell the user the search failed.` };
+  const tried = [];
+  let results = [];
+  let served = "";
+  for (const b of WEB_SEARCH_BACKENDS) {
+    try {
+      const signal = typeof AbortSignal !== "undefined" && AbortSignal.timeout ? AbortSignal.timeout(WEB_SEARCH_OPTS.timeoutMs) : undefined;
+      const res = await fetch(b.url(q), { credentials: "omit", redirect: "follow", signal });
+      if (!res.ok) { tried.push(`${b.name}: HTTP ${res.status}`); continue; }
+      const body = await (signal ? Promise.race([res.text(), new Promise((_, rej) => signal.addEventListener("abort", () => rej(new Error("timeout")), { once: true }))]) : res.text());
+      const parsed = b.parse(body).slice(0, n);
+      if (!parsed.length) { tried.push(`${b.name}: 0 results (rate-limit / layout)`); continue; }
+      results = parsed; served = b.name; break;
+    } catch (e) {
+      const msg = e && (e.name === "TimeoutError" || e.name === "AbortError" || e.message === "timeout") ? `timeout after ${WEB_SEARCH_OPTS.timeoutMs} ms` : (e && e.message ? e.message : String(e));
+      tried.push(`${b.name}: ${msg}`);
+    }
   }
-  const results = parseDdgHtml(html).slice(0, n);
   if (!results.length) {
     return {
-      query: q, count: 0, results: [],
-      note: "No results parsed — DuckDuckGo likely RATE-LIMITED you (a captcha/empty page is common after several searches fired in quick succession). Do NOT immediately re-fire the same query. SWITCH TO google_search — it uses Google (richer results + an AI Overview summary, far less rate-limited) and usually answers the question directly. A transient 0-result does NOT license inventing an answer."
+      query: q, count: 0, results: [], backends_tried: tried,
+      note: "No results from any search backend (" + tried.join("; ") + "). Do NOT re-fire the same query. Try google_search once, or navigate to the most likely official site and read_page it. A 0-result search does NOT license inventing an answer."
     };
   }
   return {
-    query: q, count: results.length, results,
+    query: q, count: results.length, results, backend: served, backends_tried: tried.length ? tried : undefined,
     note: "REAL search snippets. Base your answer ONLY on these (or a page you then open with navigate/read_page) and cite the url. Do NOT add statistics, product names, company names, or quotes that are not present here."
   };
 }
@@ -1754,6 +1875,7 @@ const MAX_SCROLL = 50000;      // px per scroll_page call
 function strLen(v) { return v == null ? 0 : (typeof v === "string" ? v.length : String(v).length); }
 function clampInt(v, lo, hi) { const n = Math.round(Number(v)); return Math.min(hi, Math.max(lo, n)); }
 
+export const __webSearchInternals = { parseDdgHtml, parseDdgLite, parseBingRss, WEB_SEARCH_BACKENDS, WEB_SEARCH_OPTS, webSearch };
 export function validateArgs(name, args) {
   switch (name) {
     case "spawn_subagent": {
@@ -1780,6 +1902,13 @@ export function validateArgs(name, args) {
       if (args.scope_instance != null && strLen(args.scope_instance) > 200) return { error: "scope_instance is too long (max 200 chars)." };
       break;
     }
+    case "create_shortcut":
+      if (!String(args.name || "").trim()) return { error: "create_shortcut requires a name (e.g. 'jobwatch' for /jobwatch)." };
+      if (strLen(args.name) > 60) return { error: "name is too long (max 60 chars)." };
+      if (!String(args.prompt || "").trim()) return { error: "create_shortcut requires the prompt text the shortcut runs." };
+      if (strLen(args.prompt) > 20000) return { error: "prompt is too long (max 20000 chars)." };
+      if (args.interval_minutes != null && Number.isFinite(Number(args.interval_minutes))) args.interval_minutes = clampInt(args.interval_minutes, 1, 10080);
+      break;
     case "read_file":
       if (!String(args.path || "").trim()) return { error: "read_file requires a file path relative to the connected folder." };
       if (strLen(args.path) > 1000) return { error: "path is too long (max 1000 chars)." };
@@ -1982,6 +2111,17 @@ export function validateArgs(name, args) {
       break;
     case "read_page":
       if (args.max_chars != null && Number.isFinite(Number(args.max_chars))) args.max_chars = clampInt(args.max_chars, 100, 200000);
+      // `url` used to be accepted silently and IGNORED — read_page read the active tab
+      // whatever the model asked for (competitive-intel export 2026-09-09 15:51: four
+      // URLs requested, one page read four times, three pages then invented). Reject a
+      // malformed one here; the executor navigates a good one. (2026-09-09)
+      if (args.url != null) {
+        const u = String(args.url).trim();
+        if (!u) delete args.url;
+        else if (!/^https?:\/\//i.test(u)) return { error: `read_page url must start with http:// or https:// (got "${u.slice(0, 120)}"). Omit url to read the active tab.` };
+        else if (u.length > 4000) return { error: `read_page url is too long (${u.length} chars, max 4000).` };
+        else args.url = u;
+      }
       break;
     case "query_elements":
       if (strLen(args.selector) > 2000) return { error: "selector is too long (max 2000 chars)." };
@@ -2242,7 +2382,10 @@ function tabsSendMessageWithTimeout(tabId, payload, ms = TOOL_RESPONSE_TIMEOUT_M
   });
 }
 
-async function sendToContent(tabId, payload) {
+async function sendToContent(tabId, payload, opts = {}) {
+  // Still-arriving page? Wait (bounded) before probing — and remember the status
+  // so a probe timeout below is described as what it is (slow server vs hung page).
+  const stillLoading = await settleIfLoading(tabId, opts.loadGraceMs);
   // First try: the content script is already present (tab loaded after install).
   try {
     return await tabsSendMessageWithTimeout(tabId, payload);
@@ -2264,9 +2407,14 @@ async function sendToContent(tabId, payload) {
   // error. A restricted page REJECTS immediately (→ the "can't access this page"
   // message); a hung one never answers (→ the timeout message, which tells the user
   // to reload). __lcTimeout marks it so callers keep the precise wording.
-  const hungPage = () => {
+  const hungPage = async () => {
+    // Re-check the LIVE status at the moment of the timeout: a page that was
+    // loading when we started, or is loading now, is a slow server — say so.
+    const loadingNow = stillLoading || (await tabStatus(tabId)) === "loading";
     const err = new Error(
-      `The page did not respond within ${FRAME_DISCOVERY_TIMEOUT_MS / 1000}s — it is hung, still loading, or mid-navigation. The tool did NOT complete; do NOT assume it succeeded. Reload the tab (F5) and retry.`
+      loadingNow
+        ? STILL_LOADING_MSG
+        : `The page did not respond within ${FRAME_DISCOVERY_TIMEOUT_MS / 1000}s — it is hung or mid-navigation. The tool did NOT complete; do NOT assume it succeeded. Reload the tab (F5) and retry.`
     );
     err.__lcTimeout = true;
     return err;
@@ -2280,7 +2428,7 @@ async function sendToContent(tabId, payload) {
       chrome.scripting.executeScript({ target: { tabId }, func: () => !!window.__localClaudeContentReady }),
       FRAME_DISCOVERY_TIMEOUT_MS, TIMED_OUT
     );
-    if (res === TIMED_OUT) throw hungPage();
+    if (res === TIMED_OUT) throw await hungPage();
     const [r] = res;
     present = !!(r && r.result);
   } catch (e) {
@@ -2293,7 +2441,7 @@ async function sendToContent(tabId, payload) {
         chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] }),
         FRAME_DISCOVERY_TIMEOUT_MS, TIMED_OUT
       );
-      if (res === TIMED_OUT) throw hungPage();
+      if (res === TIMED_OUT) throw await hungPage();
     } catch (e) {
       if (e && e.__lcTimeout) throw e;
       throw new Error(RESTRICTED);
@@ -2392,6 +2540,7 @@ export async function frameIdsWithContent(tabId) {
 // path already has this guard via tabsSendMessageWithTimeout; sendToAllFrames did
 // not. A timed-out frame resolves to null so the frames that DID answer still win.
 async function sendToAllFrames(tabId, payload, ms = TOOL_RESPONSE_TIMEOUT_MS) {
+  await settleIfLoading(tabId); // still-arriving page: give it the grace period once, here
   const ids = await frameIdsWithContent(tabId);
   const settled = await Promise.all(ids.map((frameId) =>
     new Promise((resolve) => {
@@ -2412,7 +2561,7 @@ async function sendToAllFrames(tabId, payload, ms = TOOL_RESPONSE_TIMEOUT_MS) {
 // frame answered (e.g. content script not yet loaded).
 async function queryElementsAllFrames(tabId, args) {
   const results = await sendToAllFrames(tabId, { type: "TOOL", name: "query_elements", args }, FRAME_READ_TIMEOUT_MS);
-  if (!results.length) return await sendToContent(tabId, { type: "TOOL", name: "query_elements", args });
+  if (!results.length) return await sendToContent(tabId, { type: "TOOL", name: "query_elements", args }, { loadGraceMs: 0 });
   const merged = [];
   let anyErr = null;
   for (const { frameId, v } of results) {
@@ -2434,13 +2583,53 @@ async function queryElementsAllFrames(tabId, args) {
   return { count: Math.min(merged.length, limit), elements: merged.slice(0, limit), frames_searched: results.length, url };
 }
 
+// Same page? Compare origin+path+query, ignoring the #fragment, a trailing slash and
+// case in the host. Used by read_page to prove the tab is showing the page that was
+// asked for before any of its text is handed to the model. (2026-09-09)
+// strictHash (2026-09-09c): on a hash-routed SPA the #fragment IS the route, so a read
+// that asked for one must also prove the fragment. Default stays fragment-blind.
+export function sameHttpUrl(a, b, strictHash = false) {
+  try {
+    const A = new URL(String(a || "")), B = new URL(String(b || ""));
+    if (A.protocol !== B.protocol) return false;
+    if (A.host.toLowerCase() !== B.host.toLowerCase()) return false;
+    const path = (u) => (u.pathname.length > 1 ? u.pathname.replace(/\/+$/, "") : u.pathname);
+    if (path(A) !== path(B) || A.search !== B.search) return false;
+    return strictHash ? A.hash === B.hash : true;
+  } catch { return false; }
+}
+export function urlHash(u) { try { return new URL(String(u || "")).hash || ""; } catch { return ""; } }
+export function sameHttpHost(a, b) {
+  try { return new URL(String(a || "")).host.toLowerCase() === new URL(String(b || "")).host.toLowerCase(); } catch { return false; }
+}
+// A landing url that is a sign-in / consent / SSO page (MM pass 2, B-1). ServiceNow's
+// login.do is on the SAME host as the record that was asked for, so a same-host
+// redirect test alone would read the login form as the record.
+export function looksLikeLoginUrl(u) {
+  try {
+    const U = new URL(String(u || ""));
+    const path = U.pathname.toLowerCase();
+    const pq = (U.pathname + U.search).toLowerCase();
+    // Segment tests run on the PATH only: "?next=/login" in a query is not a login page
+    // (MM pass 3, N-8). The nav_to uri is terminated so uri=login_history_list.do is not.
+    return /(?:^|\/)(?:login|logout|welcome|sso_login|side_door)\.do$/.test(path)
+      || /\/(?:oauth2?|saml2?|auth|sso|signin|sign-in|login|logout|consent|captcha|challenge)(?:\/|$)/.test(path)
+      || /\/accounts\/(?:signin|servicelogin)/.test(path)
+      || /sysparm_login=|\/nav_to\.do\?uri=(?:%2f)?login(?:\.do|%2e|[?&#]|$)/.test(pq);
+  } catch { return false; }
+}
+// The site root ("/" with no query) — where a catch-all 302 sends an unknown path.
+export function isSiteRoot(u) {
+  try { const U = new URL(String(u || "")); return (U.pathname === "/" || U.pathname === "") && !U.search; } catch { return false; }
+}
+
 // read_page across ALL frames (deduplicated): the top frame's read already pierces
 // same-origin descendants, but cross-origin course/SCORM frames are missed — so
 // append each frame's text that isn't already represented. Lets the model READ the
 // deep slide DOM (controls, state, gating) instead of guessing from screenshots.
 async function readPageAllFrames(tabId, args) {
   const results = await sendToAllFrames(tabId, { type: "TOOL", name: "read_page", args }, FRAME_READ_TIMEOUT_MS);
-  if (!results.length) return await sendToContent(tabId, { type: "TOOL", name: "read_page", args });
+  if (!results.length) return await sendToContent(tabId, { type: "TOOL", name: "read_page", args }, { loadGraceMs: 0 });
   const top = (results.find((r) => r.frameId === 0) || results[0]).v || {};
   let acc = String(top.text || "");
   for (const { frameId, v } of results) {
@@ -2474,7 +2663,7 @@ function pickActing(results) {
 }
 async function sendToActingFrame(tabId, payload) {
   const results = await sendToAllFrames(tabId, payload);
-  if (!results.length) return await sendToContent(tabId, payload);
+  if (!results.length) return await sendToContent(tabId, payload, { loadGraceMs: 0 });
   return pickActing(results);
 }
 
@@ -2490,24 +2679,82 @@ async function resolveTab(ctx) {
   return getActiveTab();
 }
 
-export function waitForLoad(tabId, timeoutMs = 15000) {
+// Load-wait budgets (ms). Mutable on purpose so tests can shrink them.
+//   default    — any site.
+//   servicenow — a *.service-now.com instance. A PDI waking from hibernation, a
+//                busy dev instance, or six logins fanned out at once routinely
+//                take longer than 15 s to send the FIRST byte. In the 2026-09-07
+//                six-instance login run navpage.do was still title-less (no
+//                document at all) when navigate's 15 s ran out, and every step
+//                after that reasoned about a page that did not exist yet.
+//   readGrace  — how long a read/action waits for a tab that is still loading
+//                before probing it (see settleIfLoading).
+export const LOAD_BUDGETS = { default: 15000, servicenow: 45000, readGrace: 8000 };
+export function loadBudgetMsFor(url) {
+  try { return isServiceNowInstanceHost(new URL(String(url || "")).host) ? LOAD_BUDGETS.servicenow : LOAD_BUDGETS.default; }
+  catch { return LOAD_BUDGETS.default; }
+}
+
+// Live tab status straight from the browser process ("loading" | "complete" |
+// "unloaded"), or "" when the tab can't be read. chrome.tabs.get cannot be stalled
+// by a busy renderer, so it is always safe to ask — unlike anything that touches
+// the page.
+export async function tabStatus(tabId) {
+  try { const t = await chrome.tabs.get(tabId); return String((t && t.status) || ""); } catch { return ""; }
+}
+
+// Resolve TRUE when the tab reports "complete" within timeoutMs, FALSE when the
+// budget runs out with the tab still loading (callers used to get no answer at
+// all and assumed success — the 2026-09-07 lie). Two signals are combined: the
+// onUpdated listener (instant) and a 500 ms chrome.tabs.get poll. The poll also
+// covers a tab that was already complete before the listener attached (a fresh
+// about:blank tab used to eat the whole budget), and every chrome.tabs.get is
+// extension-API activity that resets the MV3 worker's idle clock — so a long
+// ServiceNow load cannot get the worker evicted mid-wait. The poll only trusts
+// "complete" after it has seen "loading" once or 1.5 s have passed, so the old
+// page's "complete" can't be mistaken for the new navigation's.
+export function waitForLoad(tabId, timeoutMs = LOAD_BUDGETS.default) {
   return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      chrome.tabs.onUpdated.removeListener(listener);
-      resolve();
-    }, timeoutMs);
+    let settled = false, sawLoading = false;
+    const t0 = Date.now();
+    const finish = (loaded) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearInterval(poll);
+      try { chrome.tabs.onUpdated.removeListener(listener); } catch {}
+      resolve(loaded);
+    };
+    const timer = setTimeout(() => finish(false), timeoutMs);
     function listener(id, info) {
-      if (id === tabId && info.status === "complete") {
-        clearTimeout(timer);
-        chrome.tabs.onUpdated.removeListener(listener);
-        resolve();
-      }
+      if (id === tabId && info.status === "complete") finish(true);
     }
+    const poll = setInterval(async () => {
+      if (settled) return;
+      const s = await tabStatus(tabId);
+      if (s === "loading") sawLoading = true;
+      else if (s === "complete" && (sawLoading || Date.now() - t0 >= 1500)) finish(true);
+    }, 500);
     chrome.tabs.onUpdated.addListener(listener);
   });
 }
 
-// --- ServiceNow classic-navigation self-heal (2026-08-02, live INC1926570 run
+// A read/action against a tab whose document has not finished ARRIVING cannot
+// succeed: content.js is injected at document_idle and executeScript waits for
+// that too, so on a page the server is still sending every probe below times out.
+// Give the load a short grace period first (bounded, worker-safe). Returns TRUE
+// when the tab is still loading afterwards; graceMs 0 = just report the status.
+async function settleIfLoading(tabId, graceMs = LOAD_BUDGETS.readGrace) {
+  if ((await tabStatus(tabId)) !== "loading") return false;
+  if (!(graceMs > 0)) return true;
+  return !(await waitForLoad(tabId, graceMs));
+}
+// The message a probe timeout gets when the tab's live status is "loading". The
+// old wording ("hung — reload the tab (F5)") was wrong on both counts for a slow
+// server: nothing is hung, and a reload restarts the slow request from zero.
+const STILL_LOADING_MSG = "The page is STILL LOADING — the server has not finished sending it (a slow server, not a hung page), so nothing on it is readable yet. The tool did NOT complete. Do NOT reload (that restarts the slow request from zero) and do not assume anything about the page. Wait, then retry the SAME tool; if it is still loading after that, report the page as not responding (never finished loading).";
+
+// --- ServiceNow classic-navigation self-heal (2026-08-02, live INC0012345 run
 // on customer-dev: a bare sys_assignment_rule_list.do rendered ServiceNow's "Page
 // not found" page, and the agent burned 6 tool calls — re-read of an unchanged
 // page, a wrapper guess, then sys_db_object label-browsing — before the list
@@ -2589,6 +2836,15 @@ export async function executeTool(name, args = {}, ctx = {}) {
   const invalid = validateArgs(name, args);
   if (invalid) return invalid;
 
+  // Live work must not invoke generic submit/editor/instance-write helpers (MM pass 4 M1) — enforced here,
+  // where these tools actually execute (the content-dispatcher denylist is depth, not enforcement).
+  if (/^(send_chat_message|draft_chat_message|delete_chat_message|drag_drop|set_editor_value|save_record|sn_login|sn_set_field|set_reference_field|open_form_section|_gmail_send)$/.test(name)) {
+    let _lt; try { _lt = await resolveTab(ctx); } catch { return { error: "Cannot verify the target tab; refusing this action." }; }
+    if (ctx.liveTradingPackInjected === true || /live-trading/i.test((_lt && _lt.url) || "")) {
+      return { error: "This helper is disabled for REAL-MONEY trading. Use fill_input / click_element on the guarded order form." };
+    }
+  }
+
   // M1 real-money target-tab guard (defense-in-depth, TOGGLE-INDEPENDENT): block any
   // page-mutating action whenever the RESOLVED target tab is the M1 brokerage origin.
   // This catches mid-run navigation onto M1 and a sub-agent bound to an M1 tab, even if
@@ -2631,11 +2887,18 @@ export async function executeTool(name, args = {}, ctx = {}) {
   // Real web research — LIVE in a real browser tab (real session, human-paced) so
   // engines don't captcha us like a headless scrape. Sub-agents search in their own
   // bound tab (visible); the top-level agent uses a throwaway tab (active tab untouched).
+  // Extension-owned "/" shortcuts + schedules (2026-09-08a): no tab, no page — the
+  // "shortcuts panel" is chrome.storage, and chrome-extension:// pages are unreachable
+  // to the page tools anyway (resume-tailoring export 2026-09-08 01:00).
+  if (SHORTCUT_TOOL_NAMES.has(name)) {
+    return await runShortcutTool(name, args, ctx);
+  }
+
   if (name === "web_search") {
     return await webSearchLive(args.query, args.limit, ctx);
   }
 
-  // Authoritative ServiceNow API Reference lookup (<local path>) — a read-only doc
+  // Authoritative ServiceNow API Reference lookup (C:\redacted\path) — a read-only doc
   // fetch, no active tab required. Available in every tool-capable phase so all
   // models share one source of truth (gates get the same corpus by injection).
   if (name === "sn_api_reference") {
@@ -2656,13 +2919,16 @@ export async function executeTool(name, args = {}, ctx = {}) {
   //   2. (M1 fail-closed happens above via M1_SAFE_AT_EXECUTOR, which excludes
   //      every desktop_* name, so they're already refused on the M1 origin.)
   if (DESKTOP_TOOL_NAMES.has(name)) {
+    if (DESKTOP_ACTION_TOOL_NAMES.has(name)) { // REAL-MONEY page: an OS-level click bypasses every content.js submit guard (MM 6aa484e7 P2)
+      try { const lt = await resolveTab(ctx); if (lt && /live-trading/i.test(lt.url || "")) return { error: "Desktop control is DISABLED on the Live Trading (real-money) page — an OS-level click bypasses the submit guards. Use click_element / fill_input / press_key." }; } catch {}
+    }
     if (!ctx.settings || !ctx.settings.desktopControlEnabled) {
       return { error: `Desktop control is OFF. Enable it in ⚙ Settings → "Enable desktop control" (and start desktop-server\\start-desktop.bat) before using "${name}".` };
     }
     const s = ctx.settings;
     switch (name) {
       case "desktop_get_screen_size": {
-        const r = await desktopBridge(s, "/health", {});
+        const r = await desktopBridge(s, "/health", null, undefined, "GET");
         if (r.error) return r;
         return r.screen ? { width: r.screen.width, height: r.screen.height, platform: r.platform } : r;
       }
@@ -2713,6 +2979,7 @@ export async function executeTool(name, args = {}, ctx = {}) {
   // cwd defaults to the configured project directory (the File System Access API
   // hides the connected folder's OS path, so run_command can't derive it).
   if (name === "run_command") {
+    try { const lt = await resolveTab(ctx); if (lt && /live-trading/i.test(lt.url || "")) return { error: "run_command is DISABLED while the Live Trading (real-money) page is active." }; } catch {} // MM pass 3 L6
     const s = ctx.settings || {};
     if (!s.commandExecEnabled) {
       return { error: "run_command is disabled. Turn on 'Run commands' in the extension Options (and start the desktop-server) to let me run shell commands like npm/git/tests." };
@@ -2734,16 +3001,28 @@ export async function executeTool(name, args = {}, ctx = {}) {
   // the service worker (host_permissions <all_urls>). Non-GET mutates remote
   // state and is approval-gated by ACTION_TOOLS/ALWAYS_CONFIRM in background.js.
   if (name === "http_request") {
-    const method = args.method || "GET";
+    const method = String(args.method || "GET").trim().toUpperCase();
+    const mutating = !["GET", "HEAD"].includes(method);
+    // MM pass 2 S5: normalize the destination before the real-money check (percent-encoding, dot segments, duplicate slashes).
+    let _u; try { _u = new URL(String(args.url)); if (!/^https?:$/.test(_u.protocol)) throw 0; } catch { return { error: "http_request requires an absolute http(s) URL." }; }
+    let _path; try { _path = decodeURIComponent(_u.pathname).replace(/\/+/g, "/"); } catch { return { error: "http_request refuses malformed URL encoding." }; }
+    _path = _path.split("/").reduce((acc, seg) => { // MM pass 3 L4: collapse "." and ".." (also from %2f-joined segments)
+      if (seg === "" || seg === ".") return acc;
+      if (seg === "..") { const i = acc.lastIndexOf("/"); return i < 0 ? "" : acc.slice(0, i); }
+      return acc + "/" + seg;
+    }, "") || "/";
+    if (mutating && /^\/api\/live-trading(?:\/|$)/i.test(_path)) { // MM 6aa484e7 P2 + pass 2 S5
+      return { error: "http_request cannot POST/PUT/DELETE to the live-trading API — real-money orders go through the guarded form (Validate → Submit Order) only." };
+    }
     const headers = {};
     if (args.headers && typeof args.headers === "object") {
       for (const [k, v] of Object.entries(args.headers)) headers[String(k)] = String(v);
     }
-    const init = { method, headers, redirect: "follow", signal: ctx.signal };
+    const init = { method, headers, redirect: mutating ? "error" : "follow", signal: ctx.signal }; // MM pass 2 S5: a mutating request never follows a redirect
     if (args.body != null && method !== "GET" && method !== "HEAD") init.body = String(args.body);
     let res;
     try {
-      res = await fetch(args.url, init);
+      res = await fetch(_u.href, init);
     } catch (e) {
       if (e && e.name === "AbortError") throw e;
       return { error: `http_request could not reach ${args.url}: ${e.message}` };
@@ -2755,7 +3034,7 @@ export async function executeTool(name, args = {}, ctx = {}) {
     const CAP = 100000;
     const truncated = bodyText.length > CAP;
     return {
-      url: args.url, method, status: res.status, ok: res.ok,
+      url: _u.href, method, status: res.status, ok: res.ok,
       headers: respHeaders,
       body: truncated ? bodyText.slice(0, CAP) + "\n…[truncated]" : bodyText,
       truncated
@@ -2770,7 +3049,7 @@ export async function executeTool(name, args = {}, ctx = {}) {
     try { ({ text } = await extractDocumentText(bytes, ".pdf")); }
     catch (e) { return { error: `read_pdf: could not extract text from ${url} — ${e.message}` }; }
     if (!text || !text.trim()) {
-      return { error: `read_pdf: ${url} has no extractable text layer (likely a scanned/image-only PDF). If you have (or can download) a LOCAL copy, call read_pdf with its full local path (<local path>) — the desktop-server OCRs scanned pages with Tesseract. Otherwise open it in a tab and capture_screenshot.` };
+      return { error: `read_pdf: ${url} has no extractable text layer (likely a scanned/image-only PDF). If you have (or can download) a LOCAL copy, call read_pdf with its full local path (C:\\redacted\\path) — the desktop-server OCRs scanned pages with Tesseract. Otherwise open it in a tab and capture_screenshot.` };
     }
     const c = Number.isFinite(cap) ? cap : 12000;
     return {
@@ -2787,37 +3066,29 @@ export async function executeTool(name, args = {}, ctx = {}) {
   // fetch_page used to return raw %PDF bytes (live conv 2026-07-20).
   if (name === "read_pdf") {
     const url = pdfUrlFromViewer(args.url) || String(args.url || args.path || "").trim();
+    const kind = classifyPdfRef(url);
     // LOCAL PDF (absolute Windows/UNC path or file:// URL) → desktop-server
     // /pdftext: PyMuPDF reads the REAL text (correct where the in-panel
     // extractor garbles subset-font encodings) and Tesseract auto-OCRs any
     // scanned pages. This is the fix for the "45 scroll+screenshot" runs.
-    const isLocalPdf = /^file:\/\//i.test(url) || /^[a-zA-Z]:[\\/]/.test(url) || /^\\\\/.test(url);
-    if (isLocalPdf) {
-      const r = await desktopBridge(ctx.settings, "/pdftext",
-        { path: url, max_chars: Number.isFinite(args.max_chars) ? Math.max(1000, args.max_chars) : undefined },
-        120000);
-      if (r.error) {
-        // A 404 means the RUNNING desktop-server predates /pdftext (live conv
-        // 2026-07-23: the model got a bare "HTTP 404" and went flailing).
-        if (/HTTP 404/.test(r.error)) {
-          return { error: "read_pdf (local file): the desktop-server that is running is an OLD build without the /pdftext endpoint. Tell the user to RESTART it (close the 'Local Desktop Control Server' window, run desktop-server\\start-desktop.bat), then retry this same call. Meanwhile you can read the PDF via run_command with a ONE-LINE python: python -u -c \"import fitz; print(fitz.open(r'<path>').get_page_text(0))\"" };
-        }
-        return { error: `read_pdf (local file): ${r.error}` };
-      }
-      if (!r.ok) return { error: `read_pdf (local file): ${r.error || "extraction failed"}` };
-      const cap = Number.isFinite(args.max_chars) ? args.max_chars : 12000;
-      const over = r.text.length > cap;
-      return {
-        path: r.path, format: "pdf", pages: r.pages, chars: r.chars,
-        ocr_pages: r.ocr_pages && r.ocr_pages.length ? r.ocr_pages : undefined,
-        text: over
-          ? r.text.slice(0, cap) + `\n…[truncated at ${cap} of ${r.text.length} chars — re-call ONCE with max_chars: ${r.text.length + 1000} to get the WHOLE document]`
-          : r.text,
-        truncated: over || r.truncated,
-        note: over ? undefined : "COMPLETE document — you now have every page; extract what you need from this text, do NOT re-read it (no more read_pdf calls, no python page dumps)."
-      };
+    if (kind === "local") return await desktopPdfText(ctx.settings, { path: url }, args.max_chars);
+    // CONNECTED-FOLDER PDF (2026-09-07c, Records-folder run): a path relative
+    // to a 📁 Local files (MCP) folder, exactly as list_files shows it. The
+    // panel supplies the bytes; the desktop-server OCRs them. Before this the
+    // model was told to pass an absolute path it could not know, retried the
+    // relative one four times and was refused as a "cycle".
+    if (kind === "folder") {
+      let resp;
+      try { resp = await chrome.runtime.sendMessage({ type: "fs_op", op: "read_file_bytes", args: { path: url } }); }
+      catch { resp = null; }
+      if (!resp) return { error: `read_pdf: "${url}" is not a web URL or an absolute local path, and no connected 📁 Local files (MCP) folder answered for it (the side panel must be open with the folder that holds it connected — or pass the file's FULL absolute path such as C:\\redacted\\path).` };
+      if (resp.error) return { error: `read_pdf: could not load "${url}" from the connected folder — ${resp.error}` };
+      if (!/\.pdf$/i.test(resp.name || "")) return { error: `read_pdf: "${url}" is not a .pdf — use read_file for ${resp.name}.` };
+      const out = await desktopPdfText(ctx.settings, { base64: resp.base64, name: resp.name, display: url }, args.max_chars);
+      if (out.error) return out;
+      return { root: resp.root, ...out, source: "connected folder → desktop-server (PyMuPDF + Tesseract OCR)" };
     }
-    if (!/^https?:\/\//i.test(url)) return { error: "read_pdf needs a full http(s) PDF URL, a chrome-extension viewer URL that wraps one, or an absolute LOCAL path like <local path> (local paths need the desktop-server running)." };
+    if (kind !== "http") return { error: "read_pdf needs a full http(s) PDF URL, a chrome-extension viewer URL that wraps one, an absolute LOCAL path like C:\\redacted\\path) folder like Records/scan.pdf (local paths and connected folders need the desktop-server running)." };
     let res;
     try { res = await fetch(url, { method: "GET", redirect: "follow", signal: ctx.signal }); }
     catch (e) { if (e && e.name === "AbortError") throw e; return { error: `read_pdf could not reach ${url}: ${e.message}` }; }
@@ -2936,6 +3207,22 @@ export async function executeTool(name, args = {}, ctx = {}) {
       if (desc.error) return { ...meta, error: desc.error };
       return { ...meta, description: desc.description, vision_model: desc.vision_model, note: "Image file — described by the vision model (visible text, numbers, layout)." };
     }
+    // read_file on a PDF with NO usable text layer (scanned, or an undecodable
+    // subset font): the panel hands back the BYTES and the desktop-server reads
+    // them with PyMuPDF + Tesseract (2026-09-07c). One read_file call now does
+    // what used to take a read_pdf with an absolute path the model never had.
+    if (name === "read_file" && resp.no_text_layer && resp.pdf_base64) {
+      const { pdf_base64, extractor_error, ...meta } = resp;
+      // MM 2026-09-07c P2: read_file's contract is `content` with a 200K default cap;
+      // desktopPdfText's 12K default is read_pdf's. Keep both fields so the phase-engine
+      // evidence flattener (keys on `content`) and read_pdf-style consumers both work.
+      const out = await desktopPdfText(ctx.settings, { base64: pdf_base64, name: resp.name, display: resp.path },
+        Number.isFinite(args.max_chars) ? args.max_chars : 200000);
+      if (out.error) {
+        return { ...meta, error: `${extractor_error} The automatic desktop-server OCR fallback (PyMuPDF + Tesseract) also failed: ${out.error} If the desktop-server is not running, tell the user in one line to start it (desktop-server\\start-desktop.bat) and retry this read ONCE after that; otherwise open the file in a tab and capture_screenshot. Do not retry the same call blindly.` };
+      }
+      return { ...meta, ...out, content: out.text, extracted: "pdf", note: `Text extracted by the desktop-server (PyMuPDF${out.ocr_pages ? " + Tesseract OCR on page(s) " + out.ocr_pages.join(", ") : ""}). ${out.note || ""}`.trim() };
+    }
     return resp;
   }
 
@@ -3039,22 +3326,29 @@ export async function executeTool(name, args = {}, ctx = {}) {
   // 3 material changes/ET-day + 5-min interval, audited, expires at the ET
   // session boundary — this tool is a thin caller, not a policy layer.
   if (name === "set_session_max_loss") {
-    if (ctx && ctx.settings && ctx.settings.riskPostureEnabled === false) {
+    const dtTab = await resolveTab(ctx);
+    // 2026-09-11: the REAL-MONEY page (live-trading.html) has its own module + own cap; the tool
+    // targets whichever module owns the ACTIVE page and never crosses over.
+    const isLivePage = !!(dtTab && /live-trading/i.test(dtTab.url || ""));
+    if (!isLivePage && ctx && ctx.settings && ctx.settings.riskPostureEnabled === false) { // paper toggle governs the paper page only (MM 6aa484e7 P9)
       return { error: "set_session_max_loss is disabled — the 'risk posture' toggle in the extension Options is OFF." };
     }
-    const dtTab = await resolveTab(ctx);
-    if (!dtTab || !/day-trading/i.test(dtTab.url || "")) {
-      return { error: "set_session_max_loss only works on the Day Trading page — open/focus the day-trading tab first." };
+    if (isLivePage && ctx && ctx.settings && ctx.settings.liveRiskPostureEnabled === false) {
+      return { error: "set_session_max_loss is disabled on the LIVE page — the 'live risk posture' toggle in the extension Options is OFF." };
     }
+    if (!dtTab || !(isLivePage || /day-trading/i.test(dtTab.url || ""))) {
+      return { error: "set_session_max_loss only works on the Day Trading or Live Trading page — open/focus that tab first." };
+    }
+    const capApiPath = isLivePage ? "/api/live-trading/session-goals/agent-cap" : "/api/day-trading/session-goals/agent-cap";
     try {
       const [inj] = await chrome.scripting.executeScript({
         target: { tabId: dtTab.id },
         world: "MAIN",
-        func: async (maxLoss, rationale) => {
+        func: async (maxLoss, rationale, apiPath) => {
           try {
             const u = (typeof firebase !== "undefined" && firebase.auth) ? firebase.auth().currentUser : null;
             const token = u ? await u.getIdToken() : null;
-            const res = await fetch("/api/day-trading/session-goals/agent-cap", {
+            const res = await fetch(apiPath, {
               method: "PUT",
               headers: Object.assign({ "Content-Type": "application/json" }, token ? { Authorization: "Bearer " + token } : {}),
               body: JSON.stringify({ maxLoss, rationale })
@@ -3065,9 +3359,9 @@ export async function executeTool(name, args = {}, ctx = {}) {
             return { error: String((e && e.message) || e) };
           }
         },
-        args: [Number(args.maxLoss), String(args.rationale || "").trim().slice(0, 300)]
+        args: [Number(args.maxLoss), String(args.rationale || "").trim().slice(0, 300), capApiPath]
       });
-      return (inj && inj.result) || { error: "No result from the Day Trading page (is it fully loaded and are you signed in?)." };
+      return (inj && inj.result) || { error: "No result from the trading page (is it fully loaded and are you signed in?)." };
     } catch (e) {
       return { error: e.message };
     }
@@ -3210,8 +3504,31 @@ export async function executeTool(name, args = {}, ctx = {}) {
           }
         }), 1500, null);
       } catch (_e) { /* scripting blocked on this page → navigate anyway */ }
-      await chrome.tabs.update(tab.id, { url });
-      await waitForLoad(tab.id);
+      // RESUME, DON'T RESTART (2026-09-07 six-instance login run): when this tab is
+      // ALREADY navigating to exactly this URL — runChild pre-navigates a sub-agent's
+      // tab, and the child's first move is usually navigate to that same URL — a
+      // tabs.update cancels the in-flight request and starts the slow server over
+      // from zero. Just wait for the load that is already under way.
+      let resumed = false;
+      try {
+        const live = await chrome.tabs.get(tab.id);
+        // MM 2026-09-07c P4: before the first byte arrives Chrome keeps the target in
+        // pendingUrl and reports url as "" / about:blank — exactly the slow-server case.
+        if (live && live.status === "loading" && (live.url === url || live.pendingUrl === url)) resumed = true;
+      } catch {}
+      if (!resumed) await chrome.tabs.update(tab.id, { url });
+      const budgetMs = loadBudgetMsFor(url);
+      const loaded = await waitForLoad(tab.id, budgetMs);
+      // Tell the truth when the budget ran out with the document still arriving.
+      // The old code returned ok:true here, and the model then read, clicked and
+      // screenshotted a page that did not exist yet.
+      if (!loaded && (await tabStatus(tab.id)) === "loading") {
+        let host = ""; try { host = new URL(url).host; } catch {}
+        return {
+          ok: false, still_loading: true, navigated_to: url, tab_status: "loading",
+          error: `The page is STILL LOADING after ${Math.round(budgetMs / 1000)}s — ${host || "the server"} has not finished sending it. This is a slow server, not a hung page: do NOT reload, click, read, or screenshot it yet (a read fails and a reload restarts the slow request from zero). Call navigate AGAIN with this SAME url — it resumes waiting on the in-flight load instead of restarting it. If it is still loading after that second try, report this instance as "not responding (page never finished loading)" and stop.`
+        };
+      }
       const notes = [];
       if (unwrapped) notes.push("URL unwrapped — it was a re-copied polaris address-bar URL (encoded params/target segment); nesting it again breaks the page.");
       if (corrected) notes.push("Host corrected to the current instance origin — the requested host was not the logged-in ServiceNow instance.");
@@ -3292,8 +3609,150 @@ export async function executeTool(name, args = {}, ctx = {}) {
       return await sendToActingFrame(tab.id, { type: "TOOL", name, args });
     // read_page MERGES across frames (deduped) so embedded course/SCORM slide text
     // is readable, not just the top document.
-    case "read_page":
-      return await readPageAllFrames(tab.id, args);
+    // URL-TARGETED READ (2026-09-09). read_page used to ignore args.url entirely and
+    // read whatever the active tab held. The competitive-intel run (export 15:51) asked
+    // for four different URLs, got northwind-pricing four times, and then INVENTED the
+    // other three pages — including a competitor price table where not one number was
+    // real. A read that cannot prove which page it read is a fabrication engine, so:
+    // a url navigates first (reusing navigate's guards, polaris unwrap and still-loading
+    // truth), and the landed URL is checked against the request before any text is
+    // returned. A mismatch is an ERROR, never quietly-someone-else's content.
+    case "read_page": {
+      let readTab = tab;
+      const wantUrl = String(args.url || "").trim();
+      // Where the navigation actually LANDED (navigate rewrites the url itself: polaris
+      // unwrap, instance-host correction, classic-404 self-heal) — the read is proven
+      // against the request OR the landing, never only the request (MM 09-09 F7).
+      let landedUrl = wantUrl;
+      let navigated = false;
+      let redirectedTo = "";
+      const wantHash = wantUrl ? urlHash(wantUrl) : "";
+      const strict = !!wantHash; // a requested #route must be proven too (F8)
+      const onTarget = (u) => sameHttpUrl(u, wantUrl, strict) || (landedUrl !== wantUrl && sameHttpUrl(u, landedUrl, strict));
+      if (wantUrl) {
+        // EXECUTOR-SIDE GATES (MM 09-09 F3 / H-2a). The loop in background.js gates
+        // read_page{url} like navigate; these hold even for a caller that did not plumb
+        // the flags — a text-recovered call, a future refactor, a sub-agent.
+        const needNav = !sameHttpUrl(readTab.url, wantUrl) || (strict && wantHash !== urlHash(readTab.url));
+        if (needNav && ctx.readOnly && !ctx.m1ReadOnly) {
+          return {
+            error: `READ-ONLY mode is ON: read_page with a url would NAVIGATE the tab (it is showing ${String(readTab.url || "").slice(0, 200) || "another page"}), and navigation is an action this mode disables. NOTHING was read.`,
+            requested_url: wantUrl, read: false,
+            note: "Call read_page WITHOUT url to read the page that is already open, or ask the user to open the page and then read it."
+          };
+        }
+        if (ctx.m1ReadOnly && !isM1ReadOnlyRoute(wantUrl)) {
+          return {
+            error: `M1 read-only: read_page may open only read-only M1 pages (home, Invest portfolio, Concentration analysis). "${wantUrl.slice(0, 200)}" is blocked — no trading, transfers, settings, or login. NOTHING was read.`,
+            requested_url: wantUrl, read: false
+          };
+        }
+        const beforeUrl = String(readTab.url || "");
+        if (needNav) {
+          // A throwing navigation (chrome.tabs.update rejects on a dead host) must come
+          // back as an honest "nothing was read", not escape past this guard. A user
+          // Stop (AbortError) is NOT an error to swallow — it propagates (MM 09-09 P3).
+          let nav;
+          try { nav = await executeTool("navigate", { url: wantUrl }, ctx); }
+          catch (e) {
+            if ((e && e.name === "AbortError") || (ctx.signal && ctx.signal.aborted)) throw e;
+            nav = { error: String((e && e.message) || e) };
+          }
+          if (nav && (nav.error || nav.ok === false)) {
+            return {
+              error: `read_page could not open ${wantUrl}: ${nav.error || "navigation did not complete"}`,
+              requested_url: wantUrl, read: false,
+              ...(nav.still_loading ? { still_loading: true } : {}),
+              note: "NOTHING was read. Do not describe this page — you have no content for it. Fix what the error names, or say in your answer that this page could not be read."
+            };
+          }
+          navigated = true;
+          if (nav && nav.navigated_to) landedUrl = String(nav.navigated_to);
+          // navigate rewrites a placeholder instance host to the signed-in instance. For a
+          // READ that is a different instance than the one asked for (MM pass 2, B-2): the
+          // text would come back stamped with the wrong request. Refuse and say which.
+          if (landedUrl !== wantUrl && !sameHttpHost(landedUrl, wantUrl)) {
+            return {
+              error: `read_page was asked for ${wantUrl} but the navigation was rewritten to ${landedUrl} (the requested host is not the signed-in instance). NOTHING was read for the requested URL.`,
+              requested_url: wantUrl, landed_url: landedUrl, read: false,
+              note: `The tab is now on ${(() => { try { return new URL(landedUrl).host; } catch { return landedUrl; } })()}. If you meant that instance, call read_page again with landed_url as the url (no navigation will be needed). If you meant a different instance, ask the user to open and sign in to it first.`
+            };
+          }
+          try { const t2 = await chrome.tabs.get(readTab.id); if (t2) readTab = t2; } catch {}
+        }
+        // One tab, one page at a time: reads issued together clobber each other.
+        const { url: liveUrl } = readTab.url ? readTab : (await chrome.tabs.get(readTab.id).catch(() => ({}))) || {};
+        if (liveUrl && !onTarget(liveUrl)) {
+          // The site moved the tab after OUR navigation: a redirect. Same site → read it
+          // and SAY so (the model is told plainly whose text this is). Another host —
+          // an SSO login page, a marketing site — is never passed off as the request.
+          // A tab still on the page it showed BEFORE the navigation did not redirect: it
+          // never moved (the original 15:51 bug shape) — that stays a refusal.
+          const stuck = beforeUrl && sameHttpUrl(liveUrl, beforeUrl, true);
+          if (navigated && looksLikeLoginUrl(liveUrl) && !looksLikeLoginUrl(wantUrl)) {
+            // A session that expired bounces to login.do on the SAME host (MM pass 2, B-1).
+            // A login-like REQUEST that lands on a login-like url is the page that was asked
+            // for and falls through to the normal proof (MM pass 3, N-8).
+            return {
+              error: `read_page opened ${wantUrl} but the navigation landed on an authentication-like URL (${liveUrl}). The requested content was NOT verified and NOTHING was read for it.`,
+              requested_url: wantUrl, tab_url: liveUrl, read: false, login_required: true,
+              note: "Most often the session is not signed in or has expired: ask the user to sign in on that tab, then read the page again. If the landing page itself is what you need, call read_page with the landing url. Do NOT describe the requested page from memory, and do NOT type credentials."
+            };
+          }
+          if (navigated && !stuck && isSiteRoot(liveUrl) && !isSiteRoot(wantUrl)) {
+            // A catch-all redirect to the home page is not the page that was asked for.
+            return {
+              error: `read_page opened ${wantUrl} but the navigation landed at the site root (${liveUrl}). The requested content was NOT verified — the page may not exist there, or the site redirects unknown paths home. NOTHING was read for the requested URL.`,
+              requested_url: wantUrl, tab_url: liveUrl, read: false, redirected_home: true,
+              note: "Do NOT describe the home page as the requested page. If the home page itself is useful, call read_page with the landing url."
+            };
+          }
+          if (navigated && !stuck && (sameHttpHost(liveUrl, wantUrl) || sameHttpHost(liveUrl, landedUrl))) {
+            redirectedTo = liveUrl;
+          } else {
+            const crossHost = navigated && !stuck;
+            return {
+              error: crossHost
+                ? `read_page opened ${wantUrl} but the site sent the tab to ${liveUrl} — a redirect to another host (often a login or consent page). NOTHING was read for the requested URL.`
+                : `read_page was asked for ${wantUrl} but the tab is showing ${liveUrl}. NOTHING was read for the requested URL.`,
+              requested_url: wantUrl, tab_url: liveUrl, read: false,
+              note: crossHost
+                ? "If this is a login page, say so and ask the user to sign in; do NOT describe the requested page. Otherwise call read_page again for this URL ALONE."
+                : "The tab did not end up on the requested page — several read_page calls issued at once share ONE tab, or something else moved it. Call read_page again for this URL ALONE and wait for the result before requesting another page. Do NOT describe the requested page until a read actually returns it."
+            };
+          }
+        }
+      }
+      const out = await readPageAllFrames(readTab.id, args);
+      if (wantUrl && out && !out.error) {
+        // The post-read witness is the page's own location.href. Absent, the read
+        // cannot be proven to be the requested page — fail closed (MM 09-09 B).
+        if (!out.url) {
+          return {
+            error: `read_page opened ${wantUrl} but the page did not report its own URL, so the text cannot be proven to be that page. The text was DISCARDED.`,
+            requested_url: wantUrl, read: false,
+            note: "Read this URL again on its own. If it keeps happening the page blocks the content script; say the page could not be read."
+          };
+        }
+        const proven = onTarget(out.url) || (redirectedTo && sameHttpUrl(out.url, redirectedTo, strict));
+        if (!proven) {
+          return {
+            error: `read_page was asked for ${wantUrl} but the content that came back is from ${out.url}. The text was DISCARDED — it is not the page you requested.`,
+            requested_url: wantUrl, tab_url: out.url, read: false,
+            note: "Read this URL again on its own, one page per call, and wait for the result. Never present another page's text as this page's content."
+          };
+        }
+        out.requested_url = wantUrl;
+        if (redirectedTo) {
+          out.redirected_to = redirectedTo;
+          out.note = `REDIRECTED: the request for ${wantUrl} landed on ${redirectedTo} (same site). The text above is THAT page's — name it as the source if you cite it.`;
+        } else if (landedUrl !== wantUrl && !sameHttpUrl(out.url, wantUrl, strict)) {
+          out.landed_url = landedUrl;
+          out.note = `URL REWRITTEN before loading: ${wantUrl} → ${landedUrl} (same site; a polaris unwrap, or the classic-form wrapper after a "Page not found"). The text above is THAT page's — name it as the source, and say so if it is itself an error or "not found" page.`;
+        }
+      }
+      return out;
+    }
     // TOP-FRAME semantics (viewport scroll; focused-element key): aggregating these
     // across frames would mis-target.
     case "scroll_page":

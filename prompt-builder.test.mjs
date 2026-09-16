@@ -31,7 +31,7 @@ t("system + user roles", noPage.length === 2 && noPage[0].role === "system" && n
 t("goal is embedded verbatim", noPage[1].content.includes("open my dashboard folder"));
 t("no page block when page is null", !noPage[1].content.includes("ACTIVE TAB"));
 
-const withPage = buildPromptWriterMessages("summarize this page", { title: "<local path> Folder Dashboard", url: "http://localhost:8790/" });
+const withPage = buildPromptWriterMessages("summarize this page", { title: "C:\\redacted\\path", url: "http://localhost:8790/" });
 t("active-tab context woven in", withPage[1].content.includes("ACTIVE TAB") && withPage[1].content.includes("http://localhost:8790/"));
 
 const chromePage = buildPromptWriterMessages("do a thing", { title: "Extensions", url: "chrome://extensions" });

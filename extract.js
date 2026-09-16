@@ -425,6 +425,26 @@ export function pdfUrlFromViewer(url) {
   return null;
 }
 
+// PDF REFERENCE CLASSIFIER (2026-09-07c, Records-folder run): where does a
+// read_pdf `url` point?
+//   "http"   — a web URL (https://…/file.pdf)
+//   "local"  — an ABSOLUTE local path (C:\redacted\path
+//              or a file: URL) — the desktop-server opens it by path
+//   "folder" — a path RELATIVE to a connected 📁 Local files (MCP) folder
+//              ("Records/scan.pdf", "scan.pdf") — the side panel supplies the
+//              bytes and the desktop-server OCRs them. The File System Access
+//              API never reveals a connected folder's disk path, so bytes are
+//              the ONLY way such a PDF can reach PyMuPDF + Tesseract.
+//   ""       — unusable (empty, or some other URL scheme)
+export function classifyPdfRef(ref) {
+  const s = String(ref || "").trim();
+  if (!s) return "";
+  if (/^https?:\/\//i.test(s)) return "http";
+  if (/^file:\/\//i.test(s) || /^[a-zA-Z]:[\\/]/.test(s) || /^\\\\/.test(s)) return "local";
+  if (/^[a-z][a-z0-9+.-]*:/i.test(s)) return "";
+  return "folder";
+}
+
 // GARBLE DETECTOR — a PDF whose embedded subset fonts have no usable /ToUnicode
 // cmap decodes into control-char mojibake, not text (live conv 2026-07-23: a
 // HealthScan PDF came out as "(5%G%C>%:>;…" and was returned as ok,

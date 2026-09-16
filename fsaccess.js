@@ -207,7 +207,7 @@ const MAX_RESPONSE_CHARS = 200000;          // 200K chars/response
 const MAX_DIR_ENTRIES = 2000;
 const MAX_RECURSIVE_DEPTH = 8;
 
-// Models often pass an ABSOLUTE path (e.g. "<local path>") even though
+// Models often pass an ABSOLUTE path (e.g. "C:\\redacted\\path") even though
 // the API is root-relative. If the connected root's folder name appears as a
 // segment, take everything AFTER it (the relative path). A drive-letter path that
 // doesn't contain the root name is genuinely outside the sandbox → error.
@@ -355,7 +355,7 @@ export async function readFileText(root, relPath, opts = {}) {
   if (cat === "extract") {
     const res = await extractDocumentText(new Uint8Array(await file.arrayBuffer()), extOf(basename));
     if (res.text == null) {
-      const e = new Error("This PDF's text could not be extracted here (scanned/image-only, or a font encoding this reader can't decode). BEST RECOVERY: call read_pdf with the file's FULL LOCAL PATH (e.g. <local path>) — the desktop-server reads it with PyMuPDF and auto-OCRs scanned pages with Tesseract. Fallback if the desktop-server is off: open it in a tab and capture_screenshot.");
+      const e = new Error("This PDF's text could not be extracted by the in-panel reader (scanned/image-only, or a font encoding it can't decode).");
       e.code = "NO_TEXT_LAYER"; throw e;
     }
     raw = res.text;
@@ -368,6 +368,32 @@ export async function readFileText(root, relPath, opts = {}) {
   const out = { content: sliced.content, name: basename, size: file.size, totalLines: sliced.totalLines, lineRange: sliced.lineRange, truncated: sliced.truncated };
   if (extracted) { out.extracted = extracted; out.note = `Text extracted from the binary .${extracted} file (layout is approximate).`; }
   return out;
+}
+
+// Raw bytes of a connected-folder file as base64 (2026-09-07c). Used to hand a
+// PDF the in-panel extractor cannot read (scanned pages, undecodable fonts) to
+// the desktop-server's PyMuPDF + Tesseract path: the File System Access API
+// hides the folder's disk path, so the bytes are the only thing that can travel.
+// Same blocked-name and 25 MB rules as readFileText.
+export async function readFileBytesB64(root, relPath) {
+  const parts = splitPath(stripRootPrefix(root.name, relPath));
+  if (!parts.length) throw new Error("Provide a file path relative to the connected root.");
+  const basename = parts[parts.length - 1];
+  if (readCategory(basename) === "blocked") { const e = new Error("Access to sensitive files is blocked: " + basename); e.code = "BLOCKED_FILENAME"; throw e; }
+  const dir = await dirAt(root, parts.slice(0, -1));
+  const fh = await dir.getFileHandle(basename);
+  const file = await fh.getFile();
+  if (file.size > MAX_BINARY_BYTES) {
+    const e = new Error(`File exceeds the ${Math.round(MAX_BINARY_BYTES / 1024 / 1024)}MB document limit (${(file.size / 1024 / 1024).toFixed(1)}MB).`);
+    e.code = "FILE_TOO_LARGE"; throw e;
+  }
+  const base64 = await new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result || "").replace(/^data:[^,]*,/, ""));
+    fr.onerror = () => reject(fr.error || new Error("could not read the file's bytes"));
+    fr.readAsDataURL(file);
+  });
+  return { base64, name: basename, size: file.size, ext: extOf(basename) };
 }
 
 // Write text to a file (relative to root), creating the file and any missing

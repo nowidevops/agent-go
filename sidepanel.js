@@ -6,8 +6,10 @@ import { activeProvider, providerLabel } from "./provider.js";
 import { CLOUD_MODELS, CLOUD_DEFAULT_MODEL } from "./cloud.js";
 import { listModels, chat } from "./ollama.js";
 import { getShortcuts, saveShortcut, computeNextFire, BUILTINS, seedDefaultShortcuts } from "./shortcuts.js";
+import { describeShortcutArgs } from "./shortcut-tool.js";
+import { riskTier, RISK_META } from "./ui-risk.js"; // display-only approval risk bands (2026-09-14 redesign)
 import { copyText, downloadMarkdown, downloadDocx, downloadPdf, exportBaseName, buildDocxBytes, buildPdfBytes, extractCodeArtifacts, downloadArtifact, buildPhaseRunReport } from "./export.js";
-import { getRootHandle, saveRootHandle, clearRootHandle, getRootHandles, addRootHandle, removeRootHandleByName, clearAllRoots, pickRoot, MAX_ROOTS, ensurePermission, ensureReadWritePermission, hasReadPermission, hasWritePermission, listDir, readFileText, writeFileText, writeFileBytes, createFolder, movePath, copyPath, deletePath, editFile, searchFiles } from "./fsaccess.js";
+import { getRootHandle, saveRootHandle, clearRootHandle, getRootHandles, addRootHandle, removeRootHandleByName, clearAllRoots, pickRoot, MAX_ROOTS, ensurePermission, ensureReadWritePermission, hasReadPermission, hasWritePermission, listDir, readFileText, readFileBytesB64, writeFileText, writeFileBytes, createFolder, movePath, copyPath, deletePath, editFile, searchFiles } from "./fsaccess.js";
 import { getSnConnections, saveSnConnections, clearSnConnections, snBasicTarget, snQueryTable, snOrigin } from "./sn-tools.js";
 import { workflowToMarkdown, eventToStepLine } from "./teach.js";
 import { initListen, getListenContext, maybeSpeak } from "./listen.js";
@@ -161,7 +163,8 @@ function showSpinner(status) {
     const tick = () => {
       if (bar.hidden) return;
       const el = bar.querySelector(".proc-elapsed");
-      if (el) el.textContent = `· ${Math.round((Date.now() - spinnerT0) / 1000)}s`;
+      const secs = Math.round((Date.now() - spinnerT0) / 1000);
+      if (el) el.textContent = secs >= 60 ? `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}` : `0:${String(secs).padStart(2, "0")}`;
     };
     tick();
     spinnerTimer = setInterval(tick, 1000); // cleared in hideSpinner so it never leaks between runs
@@ -222,6 +225,40 @@ function friendlyToolLabel(name, args) {
       if (name && name.startsWith("desktop_")) return "Controlling the desktop…";
       return "Working…";
   }
+}
+// Screen-reader announcements for moments that need attention (not every streamed token). 2026-09-14 redesign.
+function announce(text) {
+  const el = document.getElementById("srAnnounce");
+  if (!el) return;
+  el.textContent = "";
+  setTimeout(() => { el.textContent = text; }, 60);
+}
+const RISK_ICON = {
+  read: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z"></path><circle cx="8" cy="8" r="2"></circle></svg>',
+  plan: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M5 4h8M5 8h8M5 12h8"></path><circle cx="2.5" cy="4" r="0.6"></circle><circle cx="2.5" cy="8" r="0.6"></circle><circle cx="2.5" cy="12" r="0.6"></circle></svg>',
+  warn: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2l6.5 11.5h-13z"></path><path d="M8 6.5v3.2M8 11.8v.1"></path></svg>'
+};
+function riskBandHtml(tier, text) {
+  const icon = tier === "read" ? RISK_ICON.read : tier === "plan" ? RISK_ICON.plan : RISK_ICON.warn;
+  return `<div class="risk-band risk-${tier}">${icon}<span>${escapeHtml(text)}</span></div>`;
+}
+const STEP_ICON = {
+  run: '<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="6" cy="6" r="4"></circle></svg>',
+  ok: '<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 6.2l2.3 2.3 4.7-4.9"></path></svg>',
+  fail: '<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 3l6 6M9 3L3 9"></path></svg>'
+};
+function stepRowHtml(icon, label, name) {
+  return `<span class="name"><span class="step-ico">${STEP_ICON[icon]}</span>${escapeHtml(label)}<span class="tool-tech">${escapeHtml(name)}</span></span>`;
+}
+function rawDetails(text) {
+  const det = document.createElement("details");
+  det.className = "tool-raw";
+  const sum = document.createElement("summary");
+  sum.textContent = "Details";
+  const pre = document.createElement("pre");
+  pre.textContent = text;
+  det.append(sum, pre);
+  return det;
 }
 const inputEl = document.getElementById("input");
 const DEFAULT_PLACEHOLDER = inputEl.placeholder; // restored when idle (busy shows a steer hint)
@@ -292,27 +329,25 @@ function codeLangLabel(lang) {
     ts: "TypeScript", typescript: "TypeScript", json: "JSON", jsonc: "JSON", java: "Java", py: "Python", python: "Python",
     html: "HTML", xml: "XML", css: "CSS", sh: "Shell", bash: "Shell", sql: "SQL", yaml: "YAML", yml: "YAML" };
   const k = String(lang || "").toLowerCase();
-  return map[k] || (lang ? String(lang).toUpperCase() : "Code");
+  // Own keys only: an inherited name like "constructor" must not come back as a function.
+  return Object.prototype.hasOwnProperty.call(map, k) ? map[k] : (lang ? String(lang).toUpperCase() : "Code");
 }
 function highlightCode(code, lang) {
   const l = String(lang || "").toLowerCase();
   const jsish = !l || /^(js|javascript|json|jsonc|ts|typescript|java|c|cpp|cs|glide|es5|node)$/.test(l);
   if (!jsish) return escapeHtml(code);
-  // ServiceNow / VS Code "Dark+" editor theme — the dark-theme counterpart of the SN
-  // Studio colors, tuned to read on the panel's DARK code card: blue keywords, green
-  // comments, warm strings, soft-green numbers, teal ITALIC class/type names
-  // (Capitalized identifiers). Everything else stays the light default ink.
-  const COL = { cmt: "#6A9955", kw: "#569CD6", str: "#CE9178", num: "#B5CEA8", type: "#4EC9B0" };
-  const span = (color, txt, italic) => `<span style="color:${color}${italic ? ";font-style:italic" : ""}">${escapeHtml(txt)}</span>`;
+  // 2026-09-14 redesign: tokens get hl-* classes (colored per light/dark theme in theme.css)
+  // instead of fixed dark-theme colors: keywords, comments, strings, numbers, Capitalized type names.
+  const span = (cls, txt) => `<span class="hl-${cls}">${escapeHtml(txt)}</span>`;
   const tok = /\/\/[^\n]*|\/\*[\s\S]*?\*\/|'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|`(?:\\.|[^`\\])*`|\b\d+(?:\.\d+)?\b|[A-Za-z_$][A-Za-z0-9_$]*|[^]/g;
   let out = "", m;
   while ((m = tok.exec(code))) {
     const t = m[0];
-    if (t.startsWith("//") || t.startsWith("/*")) out += span(COL.cmt, t);
-    else if (/^['"`]/.test(t)) out += span(COL.str, t);
-    else if (/^\d/.test(t)) out += span(COL.num, t);
-    else if (HL_KEYWORDS.has(t)) out += span(COL.kw, t);
-    else if (/^[A-Z][A-Za-z0-9_$]*$/.test(t)) out += span(COL.type, t, true); // Capitalized → class/type (teal italic)
+    if (t.startsWith("//") || t.startsWith("/*")) out += span("cmt", t);
+    else if (/^['"`]/.test(t)) out += span("str", t);
+    else if (/^\d/.test(t)) out += span("num", t);
+    else if (HL_KEYWORDS.has(t)) out += span("kw", t);
+    else if (/^[A-Z][A-Za-z0-9_$]*$/.test(t)) out += span("type", t); // Capitalized → class/type
     else out += escapeHtml(t);
   }
   return out;
@@ -327,7 +362,6 @@ function mdTables(s) {
   const lines = s.split("\n");
   const isSep = (l) => l != null && l.includes("-") && /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(l);
   const cells = (row) => row.replace(/^\s*\|/, "").replace(/\|\s*$/, "").split("|").map((c) => c.trim());
-  const bd = "border-bottom:1px solid var(--border-color,#404040);border-right:1px solid var(--border-color,#404040);padding:4px 8px";
   const out = [];
   for (let i = 0; i < lines.length; i++) {
     if (lines[i].includes("|") && isSep(lines[i + 1])) {
@@ -335,18 +369,14 @@ function mdTables(s) {
       const body = [];
       let j = i + 2;
       while (j < lines.length && lines[j].includes("|") && lines[j].trim() !== "") { body.push(cells(lines[j])); j++; }
-      // Rounded frame mirroring .code-card (outer wrapper rounds + clips corners,
-      // inner div scrolls wide tables), with a header row that MATCHES the code-card
-      // header bar (same --bg-tertiary background + --text-secondary label).
-      // The head bar carries a Copy button (delegated handler near the top of this
-      // file) so every table is one-click copyable, like code cards.
-      let t = '<div class="md-table-wrap" style="margin:8px 0;border:1px solid var(--border-color,#404040);border-radius:8px;overflow:hidden">'
-        + '<div class="md-table-head" style="display:flex;align-items:center;justify-content:space-between;gap:8px;background:var(--bg-tertiary,#2D2D2D);border-bottom:1px solid var(--border-color,#404040);padding:4px 10px">'
-        + '<span style="font-size:11px;color:var(--text-secondary,#808080);letter-spacing:.2px">▦ Table</span>'
-        + '<button class="table-copy" type="button" title="Copy table (pastes into spreadsheets and docs)">Copy</button></div>'
-        + '<div style="overflow-x:auto"><table class="md-table" style="border-collapse:collapse;width:100%;font-size:11.5px"><thead><tr>';
-      t += head.map((c) => `<th style="${bd};text-align:left;background:var(--bg-tertiary,#2D2D2D);color:var(--text-secondary,#808080);font-weight:600;letter-spacing:.2px">${c}</th>`).join("") + "</tr></thead><tbody>";
-      for (const r of body) t += "<tr>" + head.map((_, ci) => `<td style="${bd};vertical-align:top">${r[ci] != null ? r[ci] : ""}</td>`).join("") + "</tr>";
+      // Framed table like .code-card (frame, header bar and cell lines styled per theme in theme.css,
+      // 2026-09-14 redesign). The head bar carries a Copy button (delegated handler near the top of
+      // this file) so every table is one-click copyable, like code cards.
+      let t = '<div class="md-table-wrap"><div class="md-table-head" style="display:flex;align-items:center;justify-content:space-between;gap:8px">'
+        + '<span>Table</span><button class="table-copy" type="button" title="Copy table (pastes into spreadsheets and docs)">Copy</button></div>'
+        + '<div style="overflow-x:auto"><table class="md-table" style="border-collapse:collapse;width:100%"><thead><tr>';
+      t += head.map((c) => `<th style="text-align:left;border-bottom:1px solid var(--line);font-weight:600">${c}</th>`).join("") + "</tr></thead><tbody>";
+      for (const r of body) t += "<tr>" + head.map((_, ci) => `<td style="border-bottom:1px solid var(--line);vertical-align:top">${r[ci] != null ? r[ci] : ""}</td>`).join("") + "</tr>";
       t += "</tbody></table></div></div>";
       out.push("", t, ""); // blank-line padding so it's its own paragraph chunk (never wrapped in <p>)
       i = j - 1;
@@ -366,10 +396,13 @@ function renderMarkdown(src, opts) {
   // number in the prose (e.g. "3 days ago") and restore it to blocks[3] =
   // undefined → the literal word "undefined" in the rendered reply.
   const blocks = [];
+  // Per-render placeholder tag, so reply text that happens to contain a marker is never replaced or deleted.
+  let cbTag; // redraw until the delimiter is absent from this reply, so no reply text can collide
+  do { cbTag = "LCCB" + Math.random().toString(36).slice(2, 10); } while (String(src0).includes("[[" + cbTag + ":"));
   let s = src0.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
     const body = highlightCode(code.replace(/\n$/, ""), lang);
-    blocks.push(`<div class="code-card"><div class="code-card-head"><span class="code-lang">&lt;/&gt; ${escapeHtml(codeLangLabel(lang))}</span><button class="code-copy" type="button" title="Copy code">Copy</button></div><pre><code class="hl">${body}</code></pre></div>`);
-    return `[[LCCODEBLOCK:${blocks.length - 1}]]`;
+    blocks.push(`<div class="code-card"><div class="code-card-head"><span class="code-lang">${escapeHtml(codeLangLabel(lang))}</span><button class="code-copy" type="button" title="Copy code">Copy</button></div><pre><code class="hl">${body}</code></pre></div>`);
+    return `[[${cbTag}:${blocks.length - 1}]]`;
   });
   s = escapeHtml(s);
   s = s.replace(/`([^`]+)`/g, "<code>$1</code>");
@@ -384,8 +417,12 @@ function renderMarkdown(src, opts) {
     return `\n<ul>${items}</ul>`;
   });
   // paragraphs (leave block-level elements we already produced, incl. tables, unwrapped)
-  s = s.split(/\n{2,}/).map((p) => (/^\s*(<(ul|ol|pre|h\d|table|div)|\[\[LCCODEBLOCK:)/.test(p) ? p : `<p>${p.replace(/\n/g, "<br>")}</p>`)).join("");
-  s = s.replace(/\[\[LCCODEBLOCK:(\d+)\]\]/g, (_, i) => blocks[+i] ?? "");
+  s = s.split(/\n{2,}/).map((p) => (/^\s*<(ul|ol|pre|h\d|table|div)/.test(p) || p.trimStart().startsWith("[[" + cbTag + ":") ? p : `<p>${p.replace(/\n/g, "<br>")}</p>`)).join("");
+  s = s.split("[[" + cbTag + ":").map((part, n) => {
+    if (!n) return part;
+    const m = part.match(/^(\d+)\]\]/);
+    return m && blocks[+m[1]] != null ? blocks[+m[1]] + part.slice(m[0].length) : "[[" + cbTag + ":" + part; // unknown index: leave the text
+  }).join("");
   return s;
 }
 
@@ -441,11 +478,9 @@ function toolStart(name, args) {
   // Full parity with local-claude-extension (2026-07-30): tool bubbles show for ALL tiers.
   const d = document.createElement("div");
   d.className = "tool";
-  d.innerHTML = `<span class="name">⚙ ${escapeHtml(name)}</span>`;
+  d.innerHTML = stepRowHtml("run", friendlyToolLabel(name, args), name); // plain-language label; raw args under Details
   if (args && Object.keys(args).length) {
-    const pre = document.createElement("pre");
-    pre.textContent = JSON.stringify(args);
-    d.appendChild(pre);
+    d.appendChild(rawDetails(JSON.stringify(args)));
   }
   logEl.appendChild(d);
   logEl.scrollTop = logEl.scrollHeight;
@@ -456,10 +491,9 @@ function toolResult(name, result, meta = {}) {
   const ok = !(result && result.error);
   const d = document.createElement("div");
   d.className = "tool " + (ok ? "ok" : "fail");
-  d.innerHTML = `<span class="name">${ok ? "✓" : "✗"} ${escapeHtml(name)}</span>`;
-  const pre = document.createElement("pre");
-  pre.textContent = JSON.stringify(result, null, 1).slice(0, 1400);
-  d.appendChild(pre);
+  const label = friendlyToolLabel(name, meta.args).replace(/…$/, "");
+  d.innerHTML = stepRowHtml(ok ? "ok" : "fail", ok ? `${label}: done` : `${label}: failed`, name);
+  d.appendChild(rawDetails(JSON.stringify(result, null, 1).slice(0, 1400)));
   // Per-step 👍/👎 REMOVED (user 2026-07-18: "too many thumbs"). The ONLY feedback control is now the
   // single run-level 👍/👎 shown ONCE on the final response (responseActions / appendRunFeedback).
   logEl.appendChild(d);
@@ -598,6 +632,31 @@ function handleChildEvent(m) {
 async function saveHistory() {
   try { await chrome.storage.local.set({ history }); } catch {}
 }
+// Empty state (2026-09-14 redesign): heading plus the original welcome message.
+// The "Try a task" example list was removed at the owner's request (2026-09-14).
+function renderEmptyState() {
+  const wrap = document.createElement("div");
+  wrap.className = "empty-state";
+  const h = document.createElement("h2");
+  h.className = "empty-title";
+  h.textContent = "What should we get done?";
+  const welcome = document.createElement("div");
+  welcome.className = "msg assistant empty-welcome";
+  welcome.innerHTML = renderMarkdown(
+    "Hi! I'm **Agent Go**, a cloud browser agent. Ask about this page, or tell me to find / click / fill things. I can also **screenshot** the page and read it with a vision model. Inference runs in the Agent Go cloud."
+  );
+  wrap.append(h, welcome); // note removed at the owner's request (2026-09-14)
+  logEl.appendChild(wrap);
+}
+
+// After the first message the examples and promise go away; the original welcome bubble stays, as before the redesign.
+function collapseEmptyState() {
+  const wrap = logEl.querySelector(".empty-state");
+  if (!wrap) return;
+  const welcome = wrap.querySelector(".empty-welcome");
+  if (welcome) wrap.replaceWith(welcome); else wrap.remove();
+}
+
 async function loadHistory() {
   try {
     const { history: h } = await chrome.storage.local.get("history");
@@ -607,16 +666,15 @@ async function loadHistory() {
   transcript = history.map((m) => ({ t: m.role === "user" ? "user" : "assistant", text: m.content }));
   logEl.innerHTML = "";
   if (!history.length) {
-    bubble("msg assistant").innerHTML = renderMarkdown(
-      "Hi! I'm **Agent Go**, a cloud browser agent. Ask about this page, or tell me to find / click / fill things. I can also **screenshot** the page and read it with a vision model. Inference runs in the Agent Go cloud."
-    );
+    renderEmptyState();
     return;
   }
+  let askBefore = ""; // the request each restored reply answered (names its export files)
   for (const m of history) {
-    if (m.role === "user") bubble("msg user", m.content);
+    if (m.role === "user") { askBefore = m.content; bubble("msg user", m.content); }
     else {
       bubble("msg assistant").innerHTML = renderMarkdown(m.content);
-      responseActions(m.content, null); // export controls (no feedback on restored turns)
+      responseActions(m.content, null, undefined, askBefore); // export controls (no feedback on restored turns)
     }
   }
 }
@@ -638,13 +696,13 @@ function updateProviderBadge(s, prov, byok) {
     let host = "";
     if (byok.provider === "custom" && byok.baseUrl) { try { host = new URL(byok.baseUrl).hostname; } catch (_e) { host = ""; } }
     providerBadge.hidden = false;
-    providerBadge.className = "provider-badge cloud";
-    providerBadge.textContent = "🔑 " + (BYOK_BADGE_NAME[byok.provider] || byok.provider) + (byok.model ? " · " + byok.model : "");
+    providerBadge.className = "provider-badge cloud byok";
+    providerBadge.textContent = "Your key · " + (BYOK_BADGE_NAME[byok.provider] || byok.provider) + (byok.model ? " · " + byok.model : "");
     providerBadge.title = "Bring your own key: turns run on " + (host || BYOK_BADGE_NAME[byok.provider] || byok.provider) + " with your key and model " + (byok.model || "") + ". Model/token usage is billed to your provider account; Agent Go charges a flat trigger fee per turn.";
   } else {
     providerBadge.hidden = false;
     providerBadge.className = "provider-badge cloud";
-    providerBadge.textContent = "☁ Agent Go" + (s && s.model ? " · " + s.model : "");
+    providerBadge.textContent = "Agent Go cloud · " + (s && s.model ? s.model : "auto model");
     providerBadge.title = "Agent Go cloud — inference runs on the Agent Go service" + (s && s.model ? " (" + s.model + ")" : " (auto model)") + ". Page content the agent reads is sent there.";
   }
   // Agent Go footer parity (2026-07-19): mirror the active model id into the
@@ -725,7 +783,7 @@ async function regrantLapsed(lapsed, preferNames = []) {
 }
 
 // Folder names the task text refers to — a path like
-// <local path> Files\1 RESEARCH\STRY0000001_RESEARCH names the connected root by
+// C:\redacted\path
 // its last segment, and a bare folder name counts too.
 function rootNamesMentioned(text, roots) {
   const t = String(text || "").toLowerCase();
@@ -777,7 +835,7 @@ async function checkStatus() {
   // BYOK-aware: under BYOK the turn runs on the user's own model (byok.model), not s.model.
   const _byok = await getByok().catch(() => null);
   updateProviderBadge(s, prov, _byok);
-  _activeModelId = (_byok && _byok.model) ? _byok.model : (s.model || ""); renderActiveModel(busy); // bottom-right model indicator
+  _activeModelId = (_byok && _byok.model) ? _byok.model : (s.model || "Auto"); renderActiveModel(busy); // bottom-right model indicator
 
   const search = s.autoWebSearch !== false ? "🔎 search auto" : "🔎 search manual";
 
@@ -813,6 +871,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if ((area === "sync" && changes.settings) || (area === "local" && changes.cloudCreds)) {
     checkStatus();
   }
+  if (area === "sync" && changes.uiTheme) renderAppearance(changes.uiTheme.newValue);
 });
 
 // ---------- agent run ----------
@@ -854,9 +913,11 @@ function setBusy(state) {
     workStart = Date.now();
     tickWork();
     workingEl.classList.add("on");
+    showSpinner("Thinking…");
     if (!workTimer) workTimer = setInterval(tickWork, 1000);
   } else {
     workingEl.classList.remove("on");
+    hideSpinner();
     if (workTimer) { clearInterval(workTimer); workTimer = null; }
   }
 }
@@ -868,6 +929,7 @@ let pendingModelOverride = null;
 function invalidatePlanCard() {
   if (!activePlanCard) return;
   activePlanCard.querySelectorAll("button").forEach((b) => (b.disabled = true));
+  activePlanCard.classList.add("superseded");
   const n = document.createElement("div");
   n.className = "approval-done";
   n.textContent = "⚠ Superseded — a newer message/plan replaced this one";
@@ -889,6 +951,7 @@ let activeDraftCard = null;
 function invalidateDraftCard() {
   if (!activeDraftCard) return;
   activeDraftCard.querySelectorAll("button").forEach((b) => (b.disabled = true));
+  activeDraftCard.classList.add("superseded");
   const n = document.createElement("div");
   n.className = "approval-done";
   n.textContent = "⚠ Superseded — a newer message replaced this draft approval";
@@ -900,7 +963,7 @@ function draftApprovalCard(info) {
   invalidateDraftCard(); // only one live draft card at a time
   const d = document.createElement("div");
   d.className = "tool approval";
-  d.innerHTML = `<span class="name">✉ Draft is in the compose box — send it?</span>`;
+  d.innerHTML = riskBandHtml("send", "Sends a message as you") + `<span class="name">Draft is in the compose box. Send it?</span>`;
   if (info.draft) {
     const pre = document.createElement("pre");
     pre.textContent = info.draft;
@@ -936,6 +999,7 @@ function draftApprovalCard(info) {
 }
 
 function run(text, modelOverride) {
+  collapseEmptyState();                         // examples must not linger or overwrite a later draft
   invalidatePlanCard();                          // a new message supersedes any pending plan
   invalidateDraftCard();                         // no-op for the approve click (finish() already closed it)
   teamsPackActiveRun = slackPackActiveRun = false; // re-set by this run's pack injection events
@@ -988,6 +1052,7 @@ function executeApprovedPlan() {
 
 // Open the agent port, send the payload, and wire all streaming/result events.
 function startAgentRun(payload) {
+  collapseEmptyState(); // also covers Resume, which does not go through run()
   setBusy(true);
   schedHalted = false; // a new run re-arms the queue: its "done" drains it
   updateSchedBanner(); // ...and repaint now, so the "paused" text doesn't linger through the whole run
@@ -1064,6 +1129,7 @@ function startAgentRun(payload) {
         break;
       case "approval_request":
         approvalCard(m.id, m.name, m.args);
+        announce(`Approval needed: ${RISK_META[riskTier(m.name, m.args) === "read" ? "review" : riskTier(m.name, m.args)].label}`);
         break;
       case "tool":
         lastToolForFeedback = { name: m.name, args: m.args }; // pair with the next tool_result for per-step feedback
@@ -1130,6 +1196,7 @@ function startAgentRun(payload) {
       case "error":
         hideSpinner();
         stopThinkTimer();
+        announce("Error: " + m.text);
         // Both 401 texts get the guide (review 2026-09-04, F1): the pre-flight's "Not signed in"
         // and the backend's "Session expired" (stale token after a failed refresh). No run rating
         // on either: nothing ran.
@@ -1147,6 +1214,7 @@ function startAgentRun(payload) {
         appendRunFeedback(activeRunId, "Rate this run (helps training): ");
         stopThinkTimer();
         setBusy(false);
+        announce("Run finished");
         try { runPort.disconnect(); } catch {}
         if (port === runPort) port = null;
         // Run left a Teams/Slack draft in the compose box → offer one-click approval.
@@ -1248,7 +1316,7 @@ function planCard() {
   invalidatePlanCard(); // only one live plan card at a time
   const d = document.createElement("div");
   d.className = "tool approval";
-  d.innerHTML = `<span class="name">📋 Plan ready — approve to run it</span>`;
+  d.innerHTML = riskBandHtml("plan", "Plan · waiting for your OK") + `<span class="name">Plan ready. Approve to run it.</span>`;
   const row = document.createElement("div");
   row.className = "approval-actions";
   const go = document.createElement("button");
@@ -1604,7 +1672,18 @@ function appendRunFeedback(runId, label) {
   logEl.scrollTop = logEl.scrollHeight;
 }
 
-function responseActions(text, runId, phaseMeta) {
+// The newest user request in the conversation (export file names start with its slug).
+function lastUserAsk() {
+  for (let i = history.length - 1; i >= 0; i--) if (history[i] && history[i].role === "user") return String(history[i].content || "");
+  return "";
+}
+function firstUserAsk() {
+  const m = history.find((x) => x && x.role === "user");
+  return m ? String(m.content || "") : "";
+}
+
+function responseActions(text, runId, phaseMeta, task) {
+  const exportTask = task != null ? task : lastUserAsk();
   const d = document.createElement("div");
   d.className = "fb-row act-row";
 
@@ -1647,7 +1726,7 @@ function responseActions(text, runId, phaseMeta) {
   // Exports use the citation-stripped text so downloaded deliverables are clean;
   // the phase-report (admin) is built separately and keeps its [E#.O#] provenance.
   const cleanText = stripCites(text);
-  const base = () => exportBaseName(cleanText);
+  const base = () => exportBaseName(cleanText, exportTask);
   const wrap = document.createElement("div");
   wrap.className = "exp-wrap";
   const toggle = document.createElement("button");
@@ -1886,6 +1965,21 @@ function addLiveStep(ev) {
       teachLivePrev.li.textContent = line; // keep only the latest value
       return;
     }
+    // A click on a field followed by its tick, typing or choice is ONE step, the same collapse the saved
+    // workflow gets (teach.js dedupeEvents). Without it the live list showed 'Click "CPR certified" <input>'
+    // and then 'Check the "CPR certified" box' for every tick (Saved workflows video probe 2026-09-13).
+    if (teachLivePrev.action === "click" && ["check", "uncheck", "input", "select"].includes(ev.action)
+        && (teachLivePrev.key === k || (!/^(a|button)$/i.test(teachLivePrev.tag || "") && teachLivePrev.shown && teachLivePrev.shown === ((ev.target && (ev.target.label || ev.target.text)) || "")))) {
+      teachLivePrev.li.textContent = line;
+      teachLivePrev.action = ev.action;
+      teachLivePrev.key = k;
+      return;
+    }
+    if ((ev.action === "check" || ev.action === "uncheck") && (teachLivePrev.action === "check" || teachLivePrev.action === "uncheck") && teachLivePrev.key === k) {
+      teachLivePrev.li.textContent = line;
+      teachLivePrev.action = ev.action;
+      return;
+    }
     if (ev.action === "navigate" && teachLivePrev.action === "navigate" && teachLivePrev.url === ev.url) return;
   }
   const li = document.createElement("li");
@@ -1900,7 +1994,7 @@ function addLiveStep(ev) {
     li.value = teachLiveCount; // don't advance the visible step number
   }
   teachLiveListEl.appendChild(li);
-  teachLivePrev = { action: ev.action, key: k, url: ev.url, li };
+  teachLivePrev = { action: ev.action, key: k, url: ev.url, li, shown: (ev.target && (ev.target.label || ev.target.text)) || "", tag: (ev.target && ev.target.tag) || "" };
   logEl.scrollTop = logEl.scrollHeight;
 }
 
@@ -1990,7 +2084,7 @@ async function stopTeaching() {
   const note = bubble("msg note", "🎬 Learning your workflow…");
   try {
     const res = await chrome.runtime.sendMessage({ type: "teach_stop", narration });
-    if (res?.workflow) {
+    if (res?.workflow && res.ok !== false) {
       note.innerHTML = renderMarkdown(
         `📚 Learned **"${res.workflow.name}"** — ${res.workflow.steps?.length || 0} steps from ${res.eventCount} recorded actions. Saved. Run it anytime from **+ → Run a saved workflow**.`
       );
@@ -2023,7 +2117,7 @@ async function showWorkflows() {
     run.textContent = "Run";
     const name = document.createElement("span");
     name.className = "name";
-    name.textContent = `${w.name} (${w.steps?.length || 0} steps)`;
+    name.textContent = `${w.demo ? "Demo · " : ""}${w.name} (${w.steps?.length || 0} steps)`;
     name.title = (w.steps || []).join("\n");
     run.addEventListener("click", () => runWorkflow(w));
     // Export the recorded workflow as click-by-click text.
@@ -2040,7 +2134,7 @@ async function showWorkflows() {
     md.className = "run";
     md.textContent = ".md";
     md.title = "Download this workflow as a Markdown file";
-    md.addEventListener("click", () => downloadMarkdown(workflowToMarkdown(w), exportBaseName(w.name || "workflow")));
+    md.addEventListener("click", () => downloadMarkdown(workflowToMarkdown(w), exportBaseName("workflow", w.name || "")));
     row.append(run, copy, md, name);
     d.appendChild(row);
   }
@@ -2052,12 +2146,79 @@ async function showWorkflows() {
   logEl.scrollTop = logEl.scrollHeight;
 }
 
+// Parameter values are collected HERE, before the model sees the task. The old prompt told the
+// model to ask for them, so every parameterized replay ended on a question with no tool call and
+// the grounding retry argued with it (SIR0014155 export 2026-09-13 20:53).
 function runWorkflow(w) {
-  const steps = (w.steps || []).map((s, i) => `${i + 1}. ${s}`).join("\n");
-  const params = (w.parameters || []).map((p) => `- ${p.name} (example: ${p.example})`).join("\n");
+  const params = (w.parameters || []).filter((p) => p && p.name);
+  if (!params.length) return sendWorkflow(w, {});
+
+  const card = document.createElement("div");
+  card.className = "tool wf-params";
+  const head = document.createElement("span");
+  head.className = "name";
+  head.textContent = `▶ ${w.name} — values for this run`;
+  const form = document.createElement("form");
+  const stamp = Date.now();
+  const fields = params.map((p, i) => {
+    const input = document.createElement("input");
+    input.type = "text";
+    input.id = `wfp-${stamp}-${i}`;
+    input.value = p.example != null ? String(p.example) : "";
+    input.autocomplete = "off";
+    const label = document.createElement("label");
+    label.htmlFor = input.id;
+    label.textContent = p.name;
+    form.append(label, input);
+    return { p, input };
+  });
+  const row = document.createElement("div");
+  row.className = "wf-row";
+  const go = document.createElement("button");
+  go.type = "submit";
+  go.className = "run";
+  go.textContent = "Run";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "run secondary";
+  cancel.textContent = "Cancel";
+  row.append(go, cancel);
+  form.appendChild(row);
+
+  const close = (note) => {
+    form.querySelectorAll("input, button").forEach((el) => (el.disabled = true));
+    head.textContent = `▶ ${w.name} — ${note}`;
+  };
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const values = {};
+    for (const { p, input } of fields) {
+      const v = input.value.trim();
+      if (!v) { input.setAttribute("aria-invalid", "true"); input.focus(); return; }
+      input.removeAttribute("aria-invalid");
+      values[p.name] = v;
+    }
+    close("running");
+    sendWorkflow(w, values);
+  });
+  cancel.addEventListener("click", () => close("cancelled"));
+  form.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.preventDefault(); close("cancelled"); } });
+
+  card.append(head, form);
+  logEl.appendChild(card);
+  logEl.scrollTop = logEl.scrollHeight;
+  fields[0].input.focus();
+  fields[0].input.select();
+}
+
+function sendWorkflow(w, values) {
+  const has = (k) => Object.prototype.hasOwnProperty.call(values, k);
+  const fill = (s) => String(s).replace(/\{(\w+)\}/g, (m, k) => (has(k) ? values[k] : m));
+  const steps = (w.steps || []).map((s, i) => `${i + 1}. ${fill(s)}`).join("\n");
   let task = `Replay this learned workflow named "${w.name}".\n\nSteps:\n${steps}`;
-  if (params) {
-    task += `\n\nThis workflow uses parameters:\n${params}\nIf I have not given you values for them in this message, ASK me for each value before you start. Then perform the steps using your browser tools.`;
+  const names = Object.keys(values);
+  if (names.length) {
+    task += `\n\nValues for this run: ${names.map((k) => `${k} = "${values[k]}"`).join(", ")}. They are already filled into the steps above, so do not ask me for them.\n\nPerform these steps now using your browser tools.`;
   } else {
     task += `\n\nPerform these steps using your browser tools.`;
   }
@@ -2407,6 +2568,18 @@ document.getElementById("menuSchedule").addEventListener("click", () => {
 document.getElementById("schedClose").addEventListener("click", closeSchedModal);
 document.getElementById("schedCancel").addEventListener("click", closeSchedModal);
 schedOverlay.addEventListener("click", (e) => { if (e.target === schedOverlay) closeSchedModal(); });
+// Esc closes the Schedule / ServiceNow windows like Prompt Builder does (2026-09-14 redesign, a11y).
+// Typed values are kept (same as the ✕ button); focus returns to the + button that opened them.
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  let closed = false;
+  if (schedOverlay.classList.contains("open")) { closeSchedModal(); closed = true; }
+  else if (snOverlay.classList.contains("open")) { snOverlay.classList.remove("open"); closed = true; }
+  if (closed) {
+    e.stopPropagation();
+    document.getElementById("attach")?.focus();
+  }
+});
 schedToggle.addEventListener("change", syncSchedFields);
 schedRecurrence.addEventListener("change", syncSchedFields);
 schedDate.addEventListener("input", updateNextNote);
@@ -2534,7 +2707,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         let toRoot; try { toRoot = pickRoot(roots, a.to); } catch (e) { return sendResponse({ error: e.message }); }
         if (toRoot.name !== root.name) return sendResponse({ error: `Cross-folder ${msg.op} isn't supported: "from" is in "${root.name}" but "to" resolves to "${toRoot.name}". Move/copy within a single connected folder.` });
       }
-      const READ_OPS = new Set(["list_files", "read_file", "search_files"]);
+      const READ_OPS = new Set(["list_files", "read_file", "read_file_bytes", "search_files"]);
       const needWrite = !READ_OPS.has(msg.op); // every organize/write op mutates the folder
       let ok = needWrite ? await hasWritePermission(root) : await hasReadPermission(root);
       if (!ok && navigator.userActivation?.isActive) {
@@ -2556,8 +2729,27 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         return sendResponse({ root: root.name, path: a.path || "", recursive: a.recursive === true, ...out });
       }
       if (msg.op === "read_file") {
-        const out = await readFileText(root, a.path, { startLine: _numOr(a.start_line), endLine: _numOr(a.end_line), maxChars: _numOr(a.max_chars) });
+        let out;
+        try {
+          out = await readFileText(root, a.path, { startLine: _numOr(a.start_line), endLine: _numOr(a.end_line), maxChars: _numOr(a.max_chars) });
+        } catch (e) {
+          // NO text layer (scanned / undecodable font): hand the BYTES back so the
+          // worker can send them to the desktop-server for PyMuPDF + Tesseract OCR
+          // (2026-09-07c). The old path threw here and told the model to call
+          // read_pdf with an absolute path it had no way of knowing.
+          if (e && e.code === "NO_TEXT_LAYER") {
+            const bytes = await readFileBytesB64(root, a.path);
+            return sendResponse({ root: root.name, path: a.path, name: bytes.name, size: bytes.size, no_text_layer: true, pdf_base64: bytes.base64, extractor_error: e.message });
+          }
+          throw e;
+        }
         return sendResponse({ root: root.name, path: a.path, ...out });
+      }
+      // Internal (not a model tool): read_pdf on a connected-folder path asks for
+      // the file's bytes and ships them to the desktop-server (2026-09-07c).
+      if (msg.op === "read_file_bytes") {
+        const bytes = await readFileBytesB64(root, a.path);
+        return sendResponse({ root: root.name, path: a.path, ...bytes });
       }
       // Organize ops (fsaccess.js): move/copy transfer raw bytes, so they work on
       // every file type — including the binaries read_file blocks.
@@ -2652,10 +2844,11 @@ const checkReadonly = document.getElementById("checkReadonly");
 let actMode = "plan"; // default: draft a plan and wait for approval before acting
 
 function renderMode() {
-  modeBtn.textContent = actMode === "auto" ? "▶▶ Act without asking ▾"
-    : actMode === "plan" ? "📋 Plan first ▾"
-    : actMode === "readonly" ? "🔒 Read-only ▾"
-    : "✋ Ask before acting ▾";
+  modeBtn.textContent = actMode === "auto" ? "Act without asking"
+    : actMode === "plan" ? "Plan first"
+    : actMode === "readonly" ? "Read-only"
+    : "Ask before acting";
+  modeBtn.dataset.mode = actMode; // 2026-09-14 redesign: CSS draws the mode's color dot and the menu chevron
   checkPlan.style.display = actMode === "plan" ? "" : "none";
   checkAsk.style.display = actMode === "ask" ? "" : "none";
   checkAuto.style.display = actMode === "auto" ? "" : "none";
@@ -2681,6 +2874,8 @@ document.getElementById("modeAsk").addEventListener("click", () => setMode("ask"
 document.getElementById("modeAuto").addEventListener("click", () => setMode("auto"));
 document.getElementById("modeReadonly").addEventListener("click", () => setMode("readonly"));
 loadMode();
+// Settings > Behavior and limits writes the same actMode; an open panel follows it.
+chrome.storage.onChanged.addListener((changes, area) => { if (area === "local" && changes.actMode) loadMode(); });
 
 // Build a readable, action-specific preview for the approval card. Returns a
 // string (rendered in a <pre>) or "" to fall back to the JSON dump.
@@ -2695,6 +2890,10 @@ function approvalPreview(name, args) {
     const lines = [...old, ...neu];
     const shown = lines.slice(0, 30).join("\n");
     return `${args.path}${args.replace_all ? "  (all occurrences)" : ""}\n${shown}${lines.length > 30 ? `\n… (+${lines.length - 30} more)` : ""}`;
+  }
+  if (name === "create_shortcut") {
+    const body = String(args.prompt ?? "");
+    return `/${String(args.name || "").trim().toLowerCase()}${args.replace_existing ? "  (replaces the existing shortcut)" : ""}\n${describeShortcutArgs(args)}\n${body.slice(0, 600)}${body.length > 600 ? "\n… (" + body.length + " chars total)" : ""}`;
   }
   if (name === "write_file" || name === "create_document") {
     const body = String(args.content ?? "");
@@ -2715,7 +2914,10 @@ function approvalPreview(name, args) {
 function approvalCard(id, name, args, container = logEl, labelPrefix = "") {
   const d = document.createElement("div");
   d.className = "tool approval";
-  d.innerHTML = `<span class="name">✋ Approval needed: ${escapeHtml(labelPrefix + name)}</span>`;
+  // An approval request is never a pure read; an unclassified tool gets the neutral "check the details" band.
+  const tier = riskTier(name, args) === "read" ? "review" : riskTier(name, args);
+  d.innerHTML = riskBandHtml(tier, labelPrefix + RISK_META[tier].label)
+    + `<span class="name">Allow this step? ${escapeHtml(friendlyToolLabel(name, args).replace(/…$/, ""))}<span class="tool-tech">${escapeHtml(labelPrefix + name)}</span></span>`;
   // Human-reviewable preview for the high-stakes tools: a command line, a file
   // diff, or the target URL — so the user approves WHAT will happen, not raw JSON.
   const preview = approvalPreview(name, args);
@@ -2838,7 +3040,7 @@ function exportConversation(kind) {
   exportMenu.classList.remove("open");
   if (!history.length) { bubble("msg note", "Nothing to export yet."); return; }
   const md = conversationMarkdown();
-  const base = exportBaseName("conversation");
+  const base = exportBaseName("conversation", firstUserAsk());
   if (kind === "copy") copyText(md);
   else if (kind === "md") downloadMarkdown(md, base);
   else if (kind === "docx") downloadDocx(md, base);
@@ -2911,7 +3113,82 @@ clearBtn.addEventListener("click", async () => {
 });
 settingsBtn.addEventListener("click", () => chrome.runtime.openOptionsPage());
 
+// Appearance menu (System / Light / Dark) — 2026-09-14 redesign. Visual only: applies
+// the theme via theme-boot.js and stores it in its own sync key (uiTheme), never inside the settings object.
+function renderAppearance(v) {
+  const val = v === "light" || v === "dark" ? v : "system";
+  const name = { system: "System", light: "Light", dark: "Dark" }[val];
+  const btn = document.getElementById("appearanceBtn");
+  const menu = document.getElementById("appearanceMenu");
+  if (btn) { btn.title = `Appearance: ${name}`; btn.setAttribute("aria-label", `Appearance: ${name}`); }
+  if (menu) menu.querySelectorAll("[data-theme-choice]").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.themeChoice === val)));
+}
+{
+  const appearanceBtn = document.getElementById("appearanceBtn");
+  const appearanceMenu = document.getElementById("appearanceMenu");
+  if (appearanceBtn && appearanceMenu) {
+    appearanceBtn.addEventListener("click", (e) => {
+      e.stopPropagation(); exportMenu.classList.remove("open"); appearanceMenu.classList.toggle("open");
+      if (appearanceMenu.classList.contains("open")) (appearanceMenu.querySelector('[aria-checked="true"]') || appearanceMenu.querySelector("[data-theme-choice]")).focus();
+    });
+    document.addEventListener("click", () => appearanceMenu.classList.remove("open"));
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && appearanceMenu.classList.contains("open")) { appearanceMenu.classList.remove("open"); appearanceBtn.focus(); } });
+    appearanceMenu.querySelectorAll("[data-theme-choice]").forEach((b) => b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const v = b.dataset.themeChoice;
+      appearanceMenu.classList.remove("open");
+      // Own sync key (uiTheme): never reads or rewrites the settings object, so it cannot undo a Settings save.
+      if (window.__agSaveTheme) window.__agSaveTheme(v); else if (window.__agSetTheme) window.__agSetTheme(v);
+      renderAppearance(v);
+      appearanceBtn.focus();
+    }));
+    // Keyboard: arrows, Home and End move between the three choices; Enter or Space picks (native buttons).
+    appearanceMenu.addEventListener("keydown", (e) => {
+      const items = [...appearanceMenu.querySelectorAll("[data-theme-choice]")];
+      const i = items.indexOf(document.activeElement);
+      let next = -1;
+      if (e.key === "ArrowDown") next = (i + 1) % items.length;
+      else if (e.key === "ArrowUp") next = (i - 1 + items.length) % items.length;
+      else if (e.key === "Home") next = 0;
+      else if (e.key === "End") next = items.length - 1;
+      if (next >= 0) { e.preventDefault(); items[next].focus(); }
+    });
+    renderAppearance(window.__agGetTheme ? window.__agGetTheme() : "system");
+    window.addEventListener("ag-theme-applied", (e) => renderAppearance(e.detail)); // late sync correction on open
+    appearanceMenu.addEventListener("focusout", (e) => { if (!appearanceMenu.contains(e.relatedTarget) && e.relatedTarget !== appearanceBtn) appearanceMenu.classList.remove("open"); });
+  }
+}
+
+// Stop in the pinned progress bar: same message as the send button's Stop (submit()).
+document.getElementById("procStop")?.addEventListener("click", () => {
+  if (!busy) return;
+  try { port?.postMessage({ type: "stop" }); } catch {}
+});
+
 loadHistory().then(checkResumable); // offer to resume an interrupted run (after history renders)
+// First-run setup (welcome.html) hands a starter prompt to the message box. It only fills
+// the box; the user reviews it and presses send.
+function takeWelcomePrompt(text) {
+  if (typeof text !== "string" || !text.trim()) return;
+  // Never replace a draft or interrupt a run: the prompt stays stored and fills the box the next time
+  // the panel opens with an empty composer.
+  if (busy || inputEl.value.trim()) return;
+  chrome.storage.local.remove(["agWelcomePrompt", "agWelcomePromptAt"]).catch(() => {});
+  inputEl.value = text;
+  inputEl.dispatchEvent(new Event("input", { bubbles: true }));
+  inputEl.focus();
+}
+// A starter prompt older than 10 minutes is stale (the panel was not opened after first run): drop it.
+chrome.storage.local.get(["agWelcomePrompt", "agWelcomePromptAt"]).then((r) => {
+  if (r.agWelcomePrompt && r.agWelcomePromptAt && Date.now() - r.agWelcomePromptAt > 10 * 60 * 1000) {
+    chrome.storage.local.remove(["agWelcomePrompt", "agWelcomePromptAt"]).catch(() => {});
+    return;
+  }
+  takeWelcomePrompt(r.agWelcomePrompt);
+}).catch(() => {});
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.agWelcomePrompt) takeWelcomePrompt(changes.agWelcomePrompt.newValue);
+});
 initListen({ run, bubble, isBusy: () => busy, inputEl }); // 🎤 dictation + 🎧 meeting listener
 initConvLog({ bubble, getMarkdown: conversationMarkdown, getEvents: () => transcript, getHistory: () => history }); // 💾 auto-save conversations for training
 loadPromptHistory();
@@ -2928,7 +3205,7 @@ setInterval(() => { if (!busy) checkStatus(); }, 20000);
 
 // A11y (UI/UX standards compliance, 2026-07-19): keep aria-expanded truthful on
 // the menu trigger buttons. Observer-only -- no existing handler is touched.
-for (const [btnId, menuId] of [["attach", "attachMenu"], ["listenBtn", "listenMenu"], ["modeBtn", "modeMenu"], ["exportBtn", "exportMenu"]]) {
+for (const [btnId, menuId] of [["attach", "attachMenu"], ["listenBtn", "listenMenu"], ["modeBtn", "modeMenu"], ["exportBtn", "exportMenu"], ["appearanceBtn", "appearanceMenu"]]) {
   const btn = document.getElementById(btnId);
   const menu = document.getElementById(menuId);
   if (!btn || !menu) continue;

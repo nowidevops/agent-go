@@ -5,14 +5,15 @@
 // the Agent Go account logic in and cutting the Ollama/provider/key UI out.
 // Author: iDevOpsLLC
 
-import { DEFAULTS, getSettings, saveSettings, getSubmitEnabled, saveSubmitEnabled } from "./settings.js";
+import { initCollapsibleSettings } from "./collapsible.js"; // settings categories collapsible, collapsed by default (2026-09-12)
+import { DEFAULTS, getSettings, saveSettings, getSubmitEnabled, saveSubmitEnabled, getLiveSubmitEnabled, saveLiveSubmitEnabled } from "./settings.js";
 import { CLOUD_MODELS } from "./cloud.js";
 import { getAuth, setAuth, signOut } from "./auth.js";
 import { updateState, checkForUpdate, dismissUpdate, downloadPageFor, updateSteps } from "./update-check.js";
 import { parseKeyFile, pickEnvKey, providersInFile, customBaseUrlFor, PROVIDER_LABEL as BYOK_PROVIDER_LABEL } from "./byok-env.js";
 import { getRootHandle, hasReadPermission, ensureReadPermission } from "./fsaccess.js";
 import { getLessons, deleteLesson, clearLessons, getTrajectories, pruneTrajectories, computeDiagnostics } from "./learning.js";
-import { getWorkflows, deleteWorkflow, clearWorkflows } from "./teach.js";
+import { getWorkflows, deleteWorkflow, clearWorkflows, seedDemoWorkflows } from "./teach.js";
 import { shortcutOwner, NOT_SIGNED_IN, getShortcuts, saveShortcut, deleteShortcut, swapShortcuts, computeNextFire, formatSchedule, INTERVAL_CHOICES, formatInterval, normalizeSchedule, slug } from "./shortcuts.js";
 
 function escapeHtml(s) {
@@ -38,9 +39,15 @@ function fill(s) {
   el("scalpingPackEnabled").checked = !!s.scalpingPackEnabled;
   el("tradingPrefillEnabled").checked = !!s.tradingPrefillEnabled;
   el("riskPostureEnabled").checked = s.riskPostureEnabled !== false; // default ON
+  // REAL-MONEY live pack (2026-09-11) — explicit true only; everything else reads as OFF
+  el("liveTradingPackEnabled").checked = s.liveTradingPackEnabled === true;
+  el("liveScalpingPackEnabled").checked = s.liveScalpingPackEnabled === true;
+  el("liveTradingPrefillEnabled").checked = s.liveTradingPrefillEnabled === true;
+  el("liveRiskPostureEnabled").checked = s.liveRiskPostureEnabled !== false; // default ON (tighten-only)
   el("autoExtendSteps").checked = s.autoExtendSteps !== false; // default ON (2026-08-20 owner: unfinished tasks must not be cut off by a hard cap)
 
   el("m1PackEnabled").checked = !!s.m1PackEnabled;
+  el("inboxPackEnabled").checked = !!s.inboxPackEnabled;
   el("teamsPackEnabled").checked = !!s.teamsPackEnabled;
   el("slackPackEnabled").checked = !!s.slackPackEnabled;
   el("unslopPackEnabled").checked = s.unslopPackEnabled !== false; // default ON (owner directive 2026-08-19)
@@ -69,11 +76,15 @@ function fill(s) {
 const $ = el;
 // Signed-in tier gate for the admin-only settings block (day-trading + M1). false until /me says "admin".
 let isAdminTier = false;
+let isTradingTier = false; // usage or admin: the day-trading packs are visible + saveable (owner directive 2026-09-04)
 
 // BYOK (bring-your-own-key) — suggested models per provider. The input is a datalist, so the
 // user can also TYPE any model id not listed; the vendor is the final judge of the id.
 const BYOK_MODELS = {
-  openai: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5-mini", "gpt-5-nano"],
+  // gpt-6-astra added 2026-09-05 (released 09-03/05; live-verified on /v1/models). The Agent Go
+  // service routes the GPT-6 family through /v1/responses — chat-completions refuses function
+  // tools for it (functions/src/modules/llm-go/sdk-dispatch.js usesResponsesApi).
+  openai: ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5-mini", "gpt-5-nano"],
   anthropic: ["claude-fable-5-1", "claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"], // claude-fable-5 retired → fable-5-1 (2026-09-01)
   gemini: ["gemini-3.1-pro-preview", "gemini-3.8-flash", "gemini-flash-latest", "gemini-flash-lite-latest"],
   xai: ["grok-4.5", "grok-4-1-fast-reasoning"],
@@ -82,6 +93,11 @@ const BYOK_MODELS = {
   custom: [
     { id: "stealth/ox-alpha", label: "Ox Alpha (OpenRouter stealth preview · 1M ctx · free) — reasoning coder for long agentic runs" },
     { id: "moonshotai/kimi-k3", label: "Kimi K3 (Moonshot · 1M ctx) — top agentic coder, rivals/beats GLM-5.2" },
+    // deepseek/deepseek-v4.1-flash added 2026-09-10 (user request): DeepSeek V4.1 Flash on
+    // OpenRouter — live-verified on /api/v1/models (1,048,576 ctx, 384K max output, tools +
+    // reasoning) at $0.15/$0.60 per 1M. Cheap long-context drafter/researcher in the same
+    // class as glm-5.3-flash; listed right after Kimi K3.
+    { id: "deepseek/deepseek-v4.1-flash", label: "DeepSeek V4.1 Flash (1M ctx · 384K out · tools + reasoning) — $0.15/$0.60, via OpenRouter" },
     { id: "z-ai/glm-5.3", label: "GLM-5.3 (Z.ai · 1M ctx) — newest GLM, successor to 5.2, via OpenRouter" },
     { id: "z-ai/glm-5.3-flash", label: "GLM-5.3 Flash (Z.ai · 1M ctx) — cheap + fast 5.3, $0.075/$0.25, via OpenRouter" },
     { id: "z-ai/glm-5.2", label: "GLM-5.2 (Z.ai · 1M ctx) — the coding leader, via OpenRouter" },
@@ -298,8 +314,8 @@ async function refreshAccount(settings) {
   $("signedOut").classList.toggle("hidden", signedIn);
   $("signedIn").classList.toggle("hidden", !signedIn);
   if (!signedIn) {
-    isAdminTier = false;
-    for (const id of ["adminOnlyPacks", "adminOnlyDiag", "adminOnlyDiagCard", "adminOnlyLearning", "adminOnlyPhase", "adminPanelLink"]) { const n = $(id); if (n) n.style.display = "none"; }
+    isAdminTier = false; isTradingTier = false;
+    for (const id of ["adminOnlyPacks", "tradingPacks", "adminOnlyDiag", "adminOnlyDiagCard", "adminOnlyLearning", "adminOnlyPhase", "adminPanelLink"]) { const n = $(id); if (n) n.style.display = "none"; }
     return;
   }
   $("userEmail").textContent = auth.email || "signed in";
@@ -309,8 +325,12 @@ async function refreshAccount(settings) {
   const showBackendUrl = (tier) => {
     const isAdmin = tier === "admin";
     isAdminTier = isAdmin;
-    // Day-trading + M1 Finance settings: ADMIN-ONLY (owner directive 2026-09-02).
+    // Fable + M1 Finance settings: ADMIN-ONLY (owner directive 2026-09-02). Day-trading packs:
+    // usage AND admin plans (owner directive 2026-09-04) — paper trading only.
     const ap = $("adminOnlyPacks"); if (ap) ap.style.display = isAdmin ? "" : "none";
+    isTradingTier = isAdmin || tier === "usage";
+    const tp = $("tradingPacks"); if (tp) tp.style.display = isTradingTier ? "" : "none";
+    const ltp = $("liveTradingPacks"); if (ltp) ltp.style.display = isAdminTier ? "" : "none"; // REAL-MONEY section: admin only (2026-09-11)
     const ap2 = $("adminPanelLink"); if (ap2) { ap2.style.display = isAdmin ? "" : "none"; ap2.href = appBase($("backendUrl").value || DEFAULTS.backendUrl) + "/agent-go-admin.html"; ap2.target = "_blank"; ap2.rel = "noopener noreferrer"; }
     for (const id of ["adminOnlyDiag", "adminOnlyDiagCard", "adminOnlyLearning", "adminOnlyPhase"]) { const n = $(id); if (n) n.style.display = isAdmin ? "" : "none"; }
     const r = $("backendUrlRow"); if (r) r.style.display = isAdmin ? "" : "none";
@@ -440,6 +460,7 @@ async function load() {
   const s = await getSettings();
   fill(s);
   el("paperOrderSubmissionEnabled").checked = await getSubmitEnabled(); // storage.local, not in `settings`
+  el("liveOrderSubmissionEnabled").checked = await getLiveSubmitEnabled(); // REAL-MONEY kill-switch, storage.local, default OFF
   await refreshAccount(s);
   startBalancePolling();
   initUpdateNotice(s).catch(() => {});
@@ -610,7 +631,12 @@ function read() {
     scalpingPackEnabled: el("scalpingPackEnabled").checked,
     tradingPrefillEnabled: el("tradingPrefillEnabled").checked,
     riskPostureEnabled: el("riskPostureEnabled").checked,
+    liveTradingPackEnabled: el("liveTradingPackEnabled").checked === true,
+    liveScalpingPackEnabled: el("liveScalpingPackEnabled").checked === true,
+    liveTradingPrefillEnabled: el("liveTradingPrefillEnabled").checked === true,
+    liveRiskPostureEnabled: el("liveRiskPostureEnabled").checked,
     m1PackEnabled: el("m1PackEnabled").checked,
+    inboxPackEnabled: el("inboxPackEnabled").checked,
     teamsPackEnabled: el("teamsPackEnabled").checked,
     slackPackEnabled: el("slackPackEnabled").checked,
     unslopPackEnabled: el("unslopPackEnabled").checked,
@@ -676,17 +702,31 @@ el("save").addEventListener("click", async () => {
     r.telemetryEnabled = false;                       // diagnostics (admin-only section); phaseFilesUrl keeps its stored value
     r.phaseEngineEnabled = false;                     // phase engine + role chains (admin-only section); phaseModels keeps its stored value
     r.fablePackEnabled = false;
+    r.m1PackEnabled = false;
+  }
+  // Day-trading packs (usage + admin, owner directive 2026-09-04): forced OFF only when the block
+  // is hidden (free tier / signed out), so a synced value can never keep them on for a tier that
+  // cannot see the controls.
+  if (!isTradingTier) {
     r.tradingPackEnabled = false;
     r.scalpingPackEnabled = false;
     r.tradingPrefillEnabled = false;
     r.riskPostureEnabled = DEFAULTS.riskPostureEnabled;
     r.additionalExcludedSymbols = [];
-    r.m1PackEnabled = false;
+  }
+  // REAL-MONEY live pack (2026-09-11): ADMIN only — the live-trading module is admin-tier on the server.
+  if (!isAdminTier) {
+    r.liveTradingPackEnabled = false;
+    r.liveScalpingPackEnabled = false;
+    r.liveTradingPrefillEnabled = false;
+    r.liveRiskPostureEnabled = DEFAULTS.liveRiskPostureEnabled;
   }
   const saved = await saveSettings(r);
-  await saveSubmitEnabled(isAdminTier && el("paperOrderSubmissionEnabled").checked); // Phase 4 kill-switch (storage.local, never sync); admin-only
+  await saveSubmitEnabled(isTradingTier && el("paperOrderSubmissionEnabled").checked); // Phase 4 kill-switch (storage.local, never sync); usage + admin
+  await saveLiveSubmitEnabled(isAdminTier && el("liveOrderSubmissionEnabled").checked === true); // REAL-MONEY kill-switch (storage.local, never sync, default OFF); admin only
   el("numCtx").value = saved.numCtx; // reflect the saved value (unclamped — your exact entry is kept)
   syncByokUi();
+  document.dispatchEvent(new CustomEvent("ag-settings-saved")); // every Save write finished: clears Unsaved changes (settings-nav.js)
   flashMsg("✓ Saved");
 });
 
@@ -694,7 +734,9 @@ el("reset").addEventListener("click", async () => {
   // Keep the account-bound values (backend URL) — reset only the behaviour settings.
   const cur = await getSettings();
   await saveSettings({ ...DEFAULTS, backendUrl: cur.backendUrl });
+  await saveLiveSubmitEnabled(false); el("liveOrderSubmissionEnabled").checked = false; // REAL-MONEY kill-switch off on reset (MM 6aa484e7 P8)
   fill({ ...DEFAULTS, backendUrl: cur.backendUrl });
+  document.dispatchEvent(new CustomEvent("ag-settings-saved")); // reset writes finished
   flashMsg("✓ Reset to defaults");
 });
 
@@ -900,7 +942,7 @@ async function renderWorkflows() {
     head.style.cssText = "display:flex;align-items:center;gap:8px";
     const title = document.createElement("span");
     title.style.flex = "1";
-    title.innerHTML = `<b>${escapeHtml(w.name)}</b> <span style="color:var(--text-secondary)">— ${w.steps?.length || 0} steps${w.parameters?.length ? ", " + w.parameters.length + " params" : ""}</span>`;
+    title.innerHTML = `${w.demo ? '<span title="Sample workflow for the public demo pages at ai.nowidevops.com/demo" style="font-size:10px;font-weight:700;color:var(--accent-orange);border:1px solid var(--accent-orange);border-radius:4px;padding:0 5px;margin-right:6px">DEMO</span>' : ""}<b>${escapeHtml(w.name)}</b> <span style="color:var(--text-secondary)">— ${w.steps?.length || 0} steps${w.parameters?.length ? ", " + w.parameters.length + " params" : ""}</span>`;
     const del = document.createElement("button");
     del.className = "secondary";
     del.style.cssText = "padding:3px 10px;font-size:11px";
@@ -944,7 +986,11 @@ el("clearWorkflowsBtn").addEventListener("click", async () => {
   setTimeout(() => (el("wfMsg").textContent = ""), 1800);
 });
 
-renderWorkflows();
+// Demo workflows (teach.js seedDemoWorkflows): users get them once per version; the key-less dev copy always. Then show the list.
+seedDemoWorkflows()
+  .then((r) => { if (r && r.skippedFull) el("wfMsg").textContent = "Demo workflows not added: not enough room under the 50-workflow limit. Delete some to make room."; })
+  .catch(() => {})
+  .finally(() => renderWorkflows());
 
 // ---------- Shortcuts (/ commands) ----------
 // ---- schedule sub-form (Off / Every… / Daily / Weekly / Once) -------------
@@ -1072,6 +1118,7 @@ async function renderShortcuts() {
   const buildRow = (s) => {
     const row = document.createElement("div");
     row.style.cssText = "display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border-color)";
+    row.dataset.scId = s.id;
     const name = document.createElement("span");
     name.style.flex = "1";
     name.innerHTML = `<b style="color:var(--accent-green)">/${escapeHtml(s.name)}</b> <span style="color:var(--text-secondary)">— ${escapeHtml(s.prompt.slice(0, 60))}${s.prompt.length > 60 ? "…" : ""}</span>`;
@@ -1259,3 +1306,21 @@ el("detachBtn").addEventListener("click", () => {
 })();
 
 load();
+
+// 2026-09-08a: the agent can now save shortcuts itself (create_shortcut tool). Re-render
+// the list whenever the stored shortcuts change under this page.
+// 2026-09-13: same for saved workflows. A Settings tab opened before a 🎬 recording kept
+// showing "No saved workflows yet" while the side panel listed and ran the new one.
+try {
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local") return;
+    const keys = Object.keys(changes);
+    if (keys.some((k) => /shortcut/i.test(k))) renderShortcuts();
+    if (keys.includes("teachWorkflows")) renderWorkflows();
+  });
+} catch {}
+
+// Settings categories: collapsible, collapsed by default (owner directive 2026-09-12). Runs after the
+// module has registered every handler, before the first paint the user can interact with.
+try { initCollapsibleSettings(); } catch (e) { console.warn("[options] collapsible init failed", e); }
+

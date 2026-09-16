@@ -4,7 +4,7 @@ Agent Go is a browser agent for ServiceNow and everyday web work. It reads the p
 on, calls tools, and acts on your behalf. Inference runs on the Agentic Copilot service, so there is
 nothing to install besides this extension — no local models, no API keys.
 
-Version: 0.2.6   Built: 2026-09-04   (same text as https://ai.nowidevops.com/agent-go.html)
+Version: 0.2.22   Built: 2026-09-15   (same text as https://ai.nowidevops.com/agent-go.html)
 
 ## Requirements
 
@@ -44,6 +44,9 @@ Download the new zip, EMPTY the folder you installed from, unzip the new files i
 folder, then on `chrome://extensions` click the reload arrow on the Agent Go card. The extension
 has a fixed ID (`igpadcnljdbbhklmgemlflnodnoihheb`), so from this release on your sign-in,
 settings and shortcuts survive an update; they live in Chrome's storage, not in the folder.
+Never click **Remove** to update: removing the extension deletes your / shortcuts, schedules
+and settings from Chrome. Before any update, open Settings and use **Export** under Shortcuts
+to keep a JSON backup; **Import** restores it if anything goes wrong.
 
 One-time exception. If your Agent Go card shows a DIFFERENT ID, you installed a pack from before
 the fixed ID. A reload keeps that old ID and sign-in keeps failing ("temporarily unavailable").

@@ -648,14 +648,14 @@ function deliverableTokenCount(text) {
   return (s.match(/\[E\d+\.O\d+\]/g) || []).length + (s.match(/\[E\d+:/g) || []).length;
 }
 
-// Shared domain-grounding block (2026-07-20): the SAME <local path> reference
+// Shared domain-grounding block (2026-07-20): the SAME C:\redacted\path
 // the gates judge against is also handed to the tool-less ORCHESTRATOR phases
 // (PLAN / SYNTHESIZE / CLARIFY) so every phase reasons from ONE source of truth.
 // Tool-capable phases (EXECUTE / repair-execute) additionally have the on-demand
 // sn_api_reference tool; the pack already advertises it (SN_REF_TOOL_NOTE).
 function domainGroundingBlock(ctx) {
   return ctx && ctx.domainPack
-    ? `\n\nDOMAIN REFERENCE (authoritative ServiceNow API/platform semantics from <local path> — plan/judge platform-behavior claims against THIS, never memory; if it does not settle a question, that is a live-instance validation item, not grounds to assume):\n${String(ctx.domainPack).slice(0, 12000)}`
+    ? `\n\nDOMAIN REFERENCE (authoritative ServiceNow API/platform semantics from C:\\redacted\\path):\n${String(ctx.domainPack).slice(0, 12000)}`
     : "";
 }
 
@@ -721,7 +721,7 @@ export async function runPhased(deps, loopCtx) {
   await persist("PLAN");
   let plan = { ok: true, fastPath: true, subtasks: [], synthesis: "" };
   try {
-    const planGround = domainGroundingBlock(ctx); // same <local path> reference the gates use
+    const planGround = domainGroundingBlock(ctx); // same C:\redacted\path
     const p1 = await callRole(deps, ctx, "orchestrator", PLAN_SYSTEM + planGround, `TASK:\n${taskText}`, { avoid: [] });
     let parsed = parsePlan(p1.content);
     if (!parsed.ok) {

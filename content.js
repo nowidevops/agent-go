@@ -195,18 +195,31 @@ function readPage(maxChars = 6000) {
 // Identify a form field: its id/name and the human label tied to it.
 // Critical for telling apart e.g. ServiceNow's "Short description" input
 // (incident.short_description) from the "Description" textarea.
+// A <label> that WRAPS its control also wraps the control's own text: every <option> of a <select>, a
+// textarea's contents. Read the label without its controls, or a dropdown's label came back as
+// "Care type Personal care Companionship Dementia care …" (Saved workflows video probe 2026-09-13).
+function labelText(lab) {
+  try {
+    if (!lab.querySelector("select, textarea, input, option")) return (lab.innerText || "").trim();
+    const c = lab.cloneNode(true);
+    c.querySelectorAll("select, textarea, input, option").forEach((n) => n.remove());
+    return (c.textContent || "").replace(/\s+/g, " ").trim();
+  } catch {
+    return (lab.innerText || "").trim();
+  }
+}
 function fieldInfo(el) {
   const doc = el.ownerDocument || document;
   let label = el.getAttribute?.("aria-label") || "";
   if (!label && el.id) {
     try {
       const lab = doc.querySelector(`label[for="${CSS.escape(el.id)}"]`);
-      if (lab) label = (lab.innerText || "").trim();
+      if (lab) label = labelText(lab);
     } catch {}
   }
   if (!label) {
     const lab = el.closest?.("label");
-    if (lab) label = (lab.innerText || "").trim();
+    if (lab) label = labelText(lab);
   }
   if (!label) label = el.getAttribute?.("placeholder") || "";
   return {
@@ -339,18 +352,79 @@ function queryElements(selector, text, limit = 20) {
 // Phase 4 submission guard — autonomous day-trading order submit requires BOTH
 // the local kill-switch (paperOrderSubmissionEnabled) AND the trading pack
 // (tradingPackEnabled, which carries the SUBMIT-mode discipline). Read live so it
-// responds instantly to a toggle. Used by EVERY DOM path that could submit an
+// responds instantly to a toggle. Since 2026-09-04 (owner directive) both default
+// ON: an UNSET kill-switch counts as allowed; only an explicit false blocks. The
+// server brakes (paper-only, sizing, lockout) are untouched. Used by EVERY DOM path that could submit an
 // order (button click, fill+submit, Enter) — not just the Submit button.
 async function dayTradingSubmitAllowed() {
   try {
     const { paperOrderSubmissionEnabled } = await chrome.storage.local.get("paperOrderSubmissionEnabled");
-    if (!paperOrderSubmissionEnabled) return false;
+    if (paperOrderSubmissionEnabled === false) return false;
     const { settings } = await chrome.storage.sync.get("settings");
-    return !!(settings && settings.tradingPackEnabled);
+    return !(settings && settings.tradingPackEnabled === false);
   } catch { return false; }
 }
-const SUBMIT_BLOCKED = { ok: false, blocked: true, reason: "Autonomous order submission is OFF — requires BOTH the day-trading agent pack AND the 'AUTONOMOUS submit (PAPER)' toggle in Options. The agent cannot place an order; a human must click Submit Order. (Validate / dry-run is still allowed.)" };
+const SUBMIT_BLOCKED = { ok: false, blocked: true, reason: "Autonomous order submission is OFF — the day-trading agent pack or the 'AUTONOMOUS submit (PAPER)' toggle was unticked in Options (both are on by default). The agent cannot place an order; a human must click Submit Order. (Validate / dry-run is still allowed.)" };
 function isOrderField(el) { try { return !!(el && el.id && /^order/i.test(el.id)); } catch { return false; } }
+
+// ── REAL-MONEY (live-trading.html) submission guard (2026-09-11) ──────────────────────
+// Mirror of the paper guard with the OPPOSITE default: BOTH the live pack toggle (sync) AND the
+// live kill-switch (storage.local) must be EXPLICITLY true. Unset = blocked. Own storage keys so a
+// paper lockout never masks (or is masked by) a live one. Used by every DOM submit vector.
+async function liveTradingSubmitAllowed() {
+  try {
+    const { liveOrderSubmissionEnabled } = await chrome.storage.local.get("liveOrderSubmissionEnabled");
+    if (liveOrderSubmissionEnabled !== true) return false;
+    const { settings } = await chrome.storage.sync.get("settings");
+    return !!(settings && settings.liveTradingPackEnabled === true && settings.liveTradingPrefillEnabled === true); // MM pass 2 S1: same three-toggle contract as liveTradingMode()
+  } catch { return false; }
+}
+const LIVE_SUBMIT_BLOCKED = { ok: false, blocked: true, reason: "REAL-MONEY order submission is OFF — the live-trading agent pack, its PREFILL toggle and the 'AUTONOMOUS submit (LIVE — REAL MONEY)' toggle must ALL THREE be explicitly enabled in Options (all off by default). The agent cannot place a live order; a human must click Submit Order." };
+const LIVE_LOCKOUT_RE = /DAILY_TIER_\w+|RISK_HALT|BOT_HALTED|NON_LIVE|AGENT_ENTRY_LIVE_ONLY|DAILY_LOSS_LOCKOUT|Daily loss limit reached|No new orders until tomorrow|max daily loss/i;
+function armLiveLockoutWatcher() {
+  let tries = 0;
+  const iv = setInterval(() => {
+    tries++;
+    try {
+      const scoped = [
+        document.getElementById("toastContainer") ? document.getElementById("toastContainer").innerText : "",
+        document.getElementById("lockoutBanner") ? document.getElementById("lockoutBanner").innerText : ""
+      ].join("\n");
+      const cleaned = scoped.replace(/[^\n]*(MANUAL_NO_SCANNER_SIGNAL|SIGNAL_ALREADY_EXECUTED)[^\n]*/gi, "");
+      if (LIVE_LOCKOUT_RE.test(cleaned)) {
+        chrome.storage.local.set({ liveTradingSubmitBlockedUntil: Date.now() + SUBMIT_LOCKOUT_MS });
+        clearInterval(iv);
+        return;
+      }
+    } catch {}
+    if (tries >= 24) clearInterval(iv);
+  }, 500);
+}
+async function guardLiveTradingSubmit() {
+  if (!(await liveTradingSubmitAllowed())) return LIVE_SUBMIT_BLOCKED;
+  const now = Date.now();
+  try {
+    const { liveTradingSubmitBlockedUntil } = await chrome.storage.local.get("liveTradingSubmitBlockedUntil");
+    if (liveTradingSubmitBlockedUntil && now < liveTradingSubmitBlockedUntil) {
+      return { ok: false, blocked: true, reason: "LIVE (real-money) submit is LOCKED OUT for the rest of the session — a prior order hit a day-ending server response. No further live orders today (clears automatically at the session boundary)." };
+    }
+  } catch { return { ok: false, blocked: true, reason: "Cannot verify or persist REAL-MONEY submit safety state — no order attempted. Reload (Ctrl+F5), reconcile, retry." }; } // MM pass 4 M4: fail closed
+  try {
+    const { liveTradingLastSubmit } = await chrome.storage.local.get("liveTradingLastSubmit");
+    const sig = orderFormSig();
+    if (liveTradingLastSubmit) {
+      if (now - liveTradingLastSubmit.ts < SUBMIT_MIN_INTERVAL_MS) {
+        return { ok: false, blocked: true, reason: "Submitting too fast on the REAL-MONEY page (" + Math.round((now - liveTradingLastSubmit.ts) / 1000) + "s since the last submit). Min " + (SUBMIT_MIN_INTERVAL_MS / 1000) + "s between orders — looks like a loop; stop and reassess." };
+      }
+      if (liveTradingLastSubmit.sig === sig && now - liveTradingLastSubmit.ts < SUBMIT_DUP_WINDOW_MS) {
+        return { ok: false, blocked: true, reason: "Duplicate REAL-MONEY order — this exact order was just submitted. Not re-submitting." };
+      }
+    }
+    await chrome.storage.local.set({ liveTradingLastSubmit: { ts: now, sig } });
+  } catch { return { ok: false, blocked: true, reason: "Cannot verify or persist REAL-MONEY submit safety state — no order attempted. Reload (Ctrl+F5), reconcile, retry." }; } // MM pass 4 M4: fail closed
+  armLiveLockoutWatcher();
+  return null; // allowed
+}
 
 // ── Phase 4.1: client-side submit hardening (anti-spam latch + local lockout) ──
 // Enforced in content.js so it holds regardless of LLM behavior; the server gate
@@ -361,7 +435,7 @@ const SUBMIT_LOCKOUT_MS = 6 * 3600 * 1000; // a server lockout stops submits for
 
 function orderFormSig() {
   const g = (id) => { const e = document.getElementById(id); return e ? String(e.value || "") : ""; };
-  return [g("orderSymbol"), g("orderSide"), g("orderQty"), g("orderType"), g("orderLimitPrice"), g("orderStopLoss"), g("orderTakeProfit"), g("orderStrategyTag")].join("|").toUpperCase();
+  return [g("orderSymbol"), g("orderSide"), g("orderQty"), g("orderType"), g("orderLimitPrice"), g("orderStopLoss"), g("orderTakeProfit"), g("orderStrategyTag"), g("orderThesis")].join("|").toUpperCase();
 }
 
 // Watch briefly for the server's lockout/blocked toast after a submit; if seen,
@@ -373,7 +447,15 @@ function armLockoutWatcher() {
   // feedback containers — NOT document.body, which contains the static dry-run hint
   // "...checks paper-mode, R:R, sizing, lockout & market hours..." that would
   // otherwise phantom-latch a lockout on the first submit.
-  const re = /ORDER BLOCKED|Daily loss limit reached|No new orders until tomorrow/i;
+  // 2026-09-10b (master-mind 6aa2e1b6 M3): "ORDER BLOCKED" REMOVED from the latch. POST /orders
+  // prefixes EVERY validator rejection with 'ORDER BLOCKED — ' (RR_TOO_LOW, VWAP_EXTENSION,
+  // RISK_TOO_HIGH ...), so one per-order geometry reject was latching a 6-hour client lockout
+  // and silently ending the buyer's day. Only the daily-loss / lockout wording latches now.
+  // 2026-09-10c (master-mind 6aa2ea93 MF-1): the server's REAL day-ending codes are DAILY_TIER_BLOCK /
+  // DAILY_TIER_FLATTEN / DAILY_TIER_SESSION_GOAL / DAILY_TIER_LOSS_COUNT, RISK_HALT and BOT_HALTED
+  // (order-validator.js); DAILY_LOSS_LOCKOUT is never emitted. Latch on those, never on the
+  // generic 'ORDER BLOCKED' prefix every per-order rejection carries.
+  const re = /DAILY_TIER_\w+|RISK_HALT|BOT_HALTED|NON_PAPER|DAILY_LOSS_LOCKOUT|Daily loss limit reached|No new orders until tomorrow|max daily loss/i; // master-mind 6aa46229 F6: prefix-match the tier codes, NON_PAPER is day-ending
   const iv = setInterval(() => {
     tries++;
     try {
@@ -393,7 +475,7 @@ function armLockoutWatcher() {
         return;
       }
     } catch {}
-    if (tries >= 8) clearInterval(iv); // ~4s @ 500ms
+    if (tries >= 24) clearInterval(iv); // ~12s @ 500ms — a slow /orders round-trip (validator reads quote+bars+positions) can exceed 4 s (master-mind 6aa2f178 P3-4)
   }, 500);
 }
 
@@ -405,7 +487,7 @@ async function guardDayTradingSubmit() {
   try {
     const { dayTradingSubmitBlockedUntil } = await chrome.storage.local.get("dayTradingSubmitBlockedUntil");
     if (dayTradingSubmitBlockedUntil && now < dayTradingSubmitBlockedUntil) {
-      return { ok: false, blocked: true, reason: "Day-trading submit is LOCKED OUT for the rest of the session — a prior order hit a daily-loss / ORDER BLOCKED response. No further orders today (clears automatically, or toggle autonomous-submit off/on)." };
+      return { ok: false, blocked: true, reason: "Day-trading submit is LOCKED OUT for the rest of the session — a prior order hit a daily-loss lockout response. No further orders today (clears automatically, or toggle autonomous-submit off/on)." };
     }
   } catch {}
   try {
@@ -462,15 +544,43 @@ async function clickElement(handle, double) {
       const g = await guardDayTradingSubmit();
       if (g) return g;
     }
+    // REAL-MONEY page: separate guard, separate kill-switch, separate lockout (2026-09-11).
+    if (/submit\s*order/i.test(txt) && /live-trading/i.test(location.href)) {
+      const g = await guardLiveTradingSubmit();
+      if (g) return g;
+    }
+    if (/live-trading/i.test(location.href) && el.id === "btnScanExec") { // MM pass 3 L9: Sched buttons are refused outright by S2
+      if (!(await liveTradingSubmitAllowed())) return { ok: false, blocked: true, reason: "REAL-MONEY autonomous execution is OFF — \"" + (txt || el.id) + "\" places live orders outside the manual form. Enable BOTH the live-trading agent pack AND 'AUTONOMOUS submit (LIVE — REAL MONEY)' to allow it." };
+      const g = await guardLiveTradingSubmit(); if (g) return g; // MM 6aa484e7 P5: the lockout latch binds here too
+    }
+    if (/live-trading/i.test(location.href) && double) double = false; // MM 6aa484e7 P5: one real-money click per tool call
+  } catch (e) {
+    lcWarn("clickElement submit-guard", e);
+    if (/day-trading|live-trading/i.test(location.href)) { // MM pass 3 L2: never fall through to a click on a trading page
+      return { ok: false, blocked: true, reason: "Trading-page click guard failed (" + ((e && e.message) || e) + ") — refusing the click. Reload the page (Ctrl+F5) and retry." };
+    }
+  }
+  // REAL-MONEY (MM pass 2 S2): the agent NEVER operates the page's global bot controls (liquidate / halt / pause /
+  // resume / scheduler). No toggle unlocks this; it sits OUTSIDE the guard try so a thrown guard cannot skip it.
+  try {
+    const txt2 = (el.innerText || el.value || "").trim();
+    if (/live-trading/i.test(location.href) &&
+        (/close\s*all|flatten|^\s*halt\b|\bpause\b|\bresume\b/i.test(txt2) ||
+         /^(btnCloseAll|btnHalt|btnPause|btnResume|btnFlatten|btnSchedStart|btnSchedStop)$/.test(el.id || ""))) {
+      return { ok: false, blocked: true, reason: "REAL-MONEY bot controls are OFF-LIMITS to the agent — \"" + (txt2 || el.id) + "\" liquidates/halts positions or starts/stops automation. Only a human clicks these." };
+    }
     // Also gate the OTHER agent-initiated order-execution vectors on the page —
     // "Scan + Execute" (#btnScanExec, runScan(true)) and the auto-exec scheduler
     // "Start" (#btnSchedStart, startScheduler()) — under the SAME kill-switch, since
     // they place orders outside the manual form. (Human clicks bypass content.js.)
     if (/day-trading/i.test(location.href) && (el.id === "btnScanExec" || el.id === "btnSchedStart") && !(await dayTradingSubmitAllowed())) {
-      return { ok: false, blocked: true, reason: "Autonomous execution is OFF — \"" + (txt || el.id) + "\" places orders outside the manual form. Enable BOTH the day-trading agent pack AND 'AUTONOMOUS submit (PAPER)' to allow it." };
+      return { ok: false, blocked: true, reason: "Autonomous execution is OFF — \"" + (txt2 || el.id) + "\" places orders outside the manual form. Enable BOTH the day-trading agent pack AND 'AUTONOMOUS submit (PAPER)' to allow it." };
     }
   } catch (e) {
     lcWarn("clickElement submit-guard", e);
+    if (/day-trading|live-trading/i.test(location.href)) { // MM pass 3 L2: never fall through to a click on a trading page
+      return { ok: false, blocked: true, reason: "Trading-page click guard failed (" + ((e && e.message) || e) + ") — refusing the click. Reload the page (Ctrl+F5) and retry." };
+    }
   }
   try {
     // DOUBLE-CLICK (double:true): two full click sequences + a real dblclick
@@ -586,6 +696,16 @@ async function pressKey(key) {
   // vector — block unless autonomous submit is allowed.
   if (keyName === "Enter" && /day-trading/i.test(location.href) && isOrderField(target)) {
     const g = await guardDayTradingSubmit();
+    if (g) return g;
+  }
+  if (/live-trading/i.test(location.href) && /^(Enter|NumpadEnter| |Space)$/.test(keyName) && target) { // MM pass 4 M3 + pass 5 N2: S2 for keys, BEFORE the P6 latch so a refused key never consumes it
+    const _bt = (target !== document.body && target.closest && target.closest("button,[role=\"button\"],a,input") ) ? (target.innerText || target.value || "").trim().slice(0, 40) : ""; // MM pass 5 N2: control-like elements only
+    if (/^(btnCloseAll|btnHalt|btnPause|btnResume|btnFlatten|btnSchedStart|btnSchedStop)$/.test(target.id || "") || /close\s*all|flatten|^\s*halt\b|\bpause\b|\bresume\b/i.test(_bt)) {
+      return { ok: false, blocked: true, reason: "REAL-MONEY bot controls are OFF-LIMITS to the agent (keyboard)." };
+    }
+  }
+  if (/^(Enter|NumpadEnter| |Space)$/.test(keyName) && /live-trading/i.test(location.href) && (!target || target === document.body || isOrderField(target) || /submit\s*order/i.test((target.innerText || target.value || (target.getAttribute && target.getAttribute("aria-label")) || "")) || target.id === "btnScanExec" || target.id === "btnSchedStart")) { // MM 6aa484e7 P6
+    const g = await guardLiveTradingSubmit();
     if (g) return g;
   }
   const win = target.ownerDocument?.defaultView || window;
@@ -1092,6 +1212,9 @@ async function fillInput(handle, value, submit) {
   if (submit && /day-trading/i.test(location.href) && isOrderField(el)) {
     const g = await guardDayTradingSubmit();
     if (g) return g;
+  }
+  if (submit && /live-trading/i.test(location.href)) { // MM pass 4 M2: one explicit guarded Submit click only (fill+submit recorded a stale signature and double-fired)
+    return { ok: false, blocked: true, reason: "REAL-MONEY fill+submit is disabled. Fill with submit:false, click Validate, then use ONE guarded Submit Order click." };
   }
   if (el.tagName === "SELECT") return selectOption(handle, value); // dropdowns: pick the matching option
   if (el.id && el.id.startsWith("sys_display.")) {
@@ -2318,6 +2441,15 @@ const lcPendingFields = new Set(); // els with a capture queued or not-yet-flush
 
 function lcEmitFieldValue(el) {
   if (!window.__lcRecording || !lcIsRecordableField(el)) return;
+  // A checkbox or radio holds no typed words. Its .value is a constant ("on", or the option name
+  // such as "CSM"), so recording it as input saved 'Type "CSM" into "CSM"' and synthesis turned a
+  // filter tick into a {csm_value} parameter (SIR0014155 Four Dragons recordings 2026-09-13).
+  // Record the resulting STATE instead.
+  const type = String((el.getAttribute && el.getAttribute("type")) || "").toLowerCase();
+  if (el.tagName === "INPUT" && (type === "checkbox" || type === "radio")) {
+    lcRecordEvent({ action: el.checked ? "check" : "uncheck", ts: Date.now(), url: location.href, target: lcDescribeForRecord(el) });
+    return;
+  }
   const value = lcFieldValue(el);
   if (!value) return; // empty (e.g. composer already cleared by a send) — nothing to record
   lcRecordEvent({
@@ -2459,6 +2591,9 @@ if (!window.__localClaudeContentReady) {
     if (msg?.type !== "TOOL") return;
     const { name, args = {} } = msg;
     const run = async () => {
+      if (/live-trading/i.test(location.href) && /^(send_chat_message|draft_chat_message|delete_chat_message|drag_drop|set_editor_value|save_record|_gmail_send)$/.test(name)) { // MM pass 3 L5 + pass 4 M1
+        return { ok: false, blocked: true, reason: "This tool is not permitted on the REAL-MONEY page — use fill_input / click_element on the guarded order form." };
+      }
       switch (name) {
         case "read_page": return readPage(args.max_chars);
         case "query_elements": return queryElements(args.selector, args.text, args.limit);

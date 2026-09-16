@@ -31,6 +31,26 @@ async function tryCloudDescribe({ settings, prompt, base64, signal }) {
 // every screenshot; capture is quick, so global serialization costs nothing real.
 const captureGuard = new Map();
 
+// captureVisibleTab round-trips into the renderer; on a tab whose document has
+// not arrived yet (a slow server — 2026-09-07 six-instance login run, where the
+// screenshot step never returned) it can sit pending, and a pending promise in
+// the MV3 worker ends as an eviction, not an error. Time-box every capture.
+const CAPTURE_TIMEOUT_MS = 10000;
+function captureWithDeadline(p, ms = CAPTURE_TIMEOUT_MS) {
+  return new Promise((resolve, reject) => {
+    let done = false;
+    const timer = setTimeout(() => {
+      if (done) return;
+      done = true;
+      reject(new Error(`the tab did not produce an image within ${ms / 1000}s (still loading, or nothing painted yet)`));
+    }, ms);
+    Promise.resolve(p).then(
+      (v) => { if (done) return; done = true; clearTimeout(timer); resolve(v); },
+      (e) => { if (done) return; done = true; clearTimeout(timer); reject(e); }
+    );
+  });
+}
+
 // Capture the visible area of `tab`. When `tab` is a BACKGROUND tab (e.g. a
 // sub-agent bound to a non-active tab), captureVisibleTab would grab whatever the
 // user is actually looking at — so we briefly activate the bound tab, capture, then
@@ -38,11 +58,11 @@ const captureGuard = new Map();
 // top-level agent's case) we capture directly with no visible side effect.
 async function captureTab(tab) {
   if (!tab || tab.id == null) {
-    return chrome.tabs.captureVisibleTab({ format: "png" }); // legacy: OS-visible active tab
+    return captureWithDeadline(chrome.tabs.captureVisibleTab({ format: "png" })); // legacy: OS-visible active tab
   }
   const windowId = tab.windowId;
   if (tab.active) {
-    return chrome.tabs.captureVisibleTab(windowId, { format: "png" }); // already front-most
+    return captureWithDeadline(chrome.tabs.captureVisibleTab(windowId, { format: "png" })); // already front-most
   }
   const release = await acquireKeyedSlot(captureGuard, "capture");
   let prevActiveId = null;
@@ -51,7 +71,7 @@ async function captureTab(tab) {
     prevActiveId = prev ? prev.id : null;
     await chrome.tabs.update(tab.id, { active: true });
     await new Promise((r) => setTimeout(r, 120)); // let the tab paint before capturing
-    return await chrome.tabs.captureVisibleTab(windowId, { format: "png" });
+    return await captureWithDeadline(chrome.tabs.captureVisibleTab(windowId, { format: "png" }));
   } finally {
     // Best-effort restore so the user is left on the tab they had focused.
     if (prevActiveId != null && prevActiveId !== tab.id) {
@@ -159,12 +179,27 @@ export async function captureAndDescribe({ focus, settings, signal, tab }) {
     ? `This is a screenshot of a web page. Focus on: ${focus}. Describe what you see relevant to that — visible text, buttons, links, fields, and layout. Be specific and concise.`
     : `This is a screenshot of a web page. Describe it concisely: main visible text, buttons, links, form fields, and overall layout/state.`;
 
-  const cloud = await tryCloudDescribe({ settings, prompt, base64, signal });
-  if (cloud) return cloud;
+  // A tab that is still loading paints blank or partial — the description would
+  // be of a page that does not exist yet. Say so on the result (browser-process
+  // check; cannot stall).
+  let loadingNote = "";
   try {
-    const msg = await describeWith({ base: settings.ollamaBase, model: settings.visionModel, prompt, base64, signal });
-    return { description: msg.content, vision_model: settings.visionModel };
-  } catch (e) {
-    return visionError(settings.visionModel, e);
+    if (tab && tab.id != null) {
+      const live = await chrome.tabs.get(tab.id);
+      if (live && live.status === "loading") loadingNote = "NOTE: this tab is STILL LOADING (the server has not finished sending the page), so the screenshot may be blank or partial and must not be treated as the page's real state. Do not reload; wait and retry.";
+    }
+  } catch {}
+  const cloud = await tryCloudDescribe({ settings, prompt, base64, signal });
+  let res;
+  if (cloud) res = cloud;
+  else {
+    try {
+      const msg = await describeWith({ base: settings.ollamaBase, model: settings.visionModel, prompt, base64, signal });
+      res = { description: msg.content, vision_model: settings.visionModel };
+    } catch (e) {
+      res = visionError(settings.visionModel, e);
+    }
   }
+  if (loadingNote && res && !res.error) return { ...res, note: loadingNote };
+  return res;
 }

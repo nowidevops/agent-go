@@ -37,23 +37,33 @@ export async function copyText(text) {
   }
 }
 
-// A filesystem-safe base name: timestamp + a short slug of the response.
-export function exportBaseName(text) {
-  const d = new Date();
-  const pad = (n) => String(n).padStart(2, "0");
-  const ts = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
-  const slug = String(text || "")
-    .replace(/[`*#>_\-\[\]()]/g, " ")
+// A filesystem-safe slug: the first few words, lowercase ASCII, dashes between words.
+function fileSlug(text, words, max) {
+  return String(text || "")
+    .replace(/[`*#>_\-\[\]()\/\\:.,;!?"']/g, " ")
     .trim()
     .split(/\s+/)
-    .slice(0, 6)
+    .slice(0, words)
     .join("-")
     .toLowerCase()
     .replace(/[^a-z0-9\-]/g, "")
     .replace(/-+/g, "-")
-    .slice(0, 40)
+    .replace(/^-|-$/g, "")
+    .replace(new RegExp(`^(.{0,${max}})(?:-.*)?$`), "$1") // cut at a word boundary
+    .slice(0, max)
     .replace(/^-|-$/g, "");
-  return `local-claude-${ts}${slug ? "-" + slug : ""}`;
+}
+
+// A filesystem-safe base name (2026-09-14): a slug of the task that produced the export, then a
+// timestamp, then a short slug of the content. "agent-go" stands in when there is no task text.
+export function exportBaseName(text, task) {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const ts = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+  const taskSlug = fileSlug(task, 6, 40);
+  const slug = fileSlug(text, 5, 32);
+  const tail = slug && !taskSlug.startsWith(slug) ? "-" + slug : "";
+  return `${taskSlug || "agent-go"}-${ts}${tail}`;
 }
 
 // ---------- markdown -> block model ----------

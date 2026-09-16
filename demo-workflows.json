@@ -1,0 +1,124 @@
+[
+  {
+    "created": 1789353531524,
+    "description": "Search for a caregiver by type and location, then send a message requesting availability for specific care hours.",
+    "eventCount": 10,
+    "id": "f84ec8bd-d938-43ca-8b39-37b94945c35c",
+    "name": "Request Caregiver Availability",
+    "narration": "I do this every week for my dad. Go to the caregiver finder. Pick the care type, and type the zip code where the care happens. Keep CPR certified and weekend availability ticked. Search, then message the first caregiver in the list. The message says who needs care, the day, and the hours.",
+    "parameters": [
+      {
+        "example": "Personal care",
+        "name": "care_type"
+      },
+      {
+        "example": "30310",
+        "name": "zip_code"
+      },
+      {
+        "example": "my father",
+        "name": "client_name"
+      },
+      {
+        "example": "this Saturday, September 19",
+        "name": "care_day"
+      },
+      {
+        "example": "from 8am to 2pm",
+        "name": "care_hours"
+      }
+    ],
+    "recordedSteps": [
+      "Click \"Quillmoor Care Finder\" <a>",
+      "Navigate to https://ai.nowidevops.com/demo/quillmoor/",
+      "Choose \"Personal care\" in dropdown \"Care type\"",
+      "Type \"30310\" into \"Client ZIP code\"",
+      "Check the \"CPR certified\" box (click it only if it is not already checked)",
+      "Check the \"Weekend availability\" box (click it only if it is not already checked)",
+      "Click \"Search caregivers\" <button>",
+      "Click \"Message Curtis Mensah\" <button>",
+      "Type \"Hi, my father needs personal care this Saturday, September 19, from 8am to 2pm near 30310. Are you available?\" into \"Your message\"",
+      "Click \"Send message\" <button>"
+    ],
+    "steps": [
+      "Navigate to https://ai.nowidevops.com/demo/quillmoor/",
+      "Select the option \"{care_type}\" in the dropdown \"Care type\"",
+      "Fill the input \"Client ZIP code\" with \"{zip_code}\"",
+      "Check the box \"CPR certified\" if it is not already checked",
+      "Check the box \"Weekend availability\" if it is not already checked",
+      "Click the button \"Search caregivers\"",
+      "Click the first \"Message\" button in the results list",
+      "Fill the input \"Your message\" with \"Hi, {client_name} needs {care_type} {care_day}, {care_hours} near {zip_code}. Are you available?\"",
+      "Click the button \"Send message\""
+    ],
+    "demo": true
+  },
+  {
+    "created": 1789353531524,
+    "description": "Submits a weekly insurance claim for home care services with variable dates, hours, and personnel details.",
+    "eventCount": 13,
+    "id": "46f44fe0-78af-42c5-88b9-367dc200d4f7",
+    "name": "Submit Tollbrook Care Claim",
+    "narration": "Now the insurance claim for last week's care. Go to the Tollbrook claims page. Type the policy number and the insured person. Then the service start and end dates, the total hours, the caregiver's name and the agency invoice number. Tick all three confirmation boxes and submit the claim. The dates, hours, caregiver and invoice change every week.",
+    "parameters": [
+      {
+        "example": "TLC-4471902",
+        "name": "policy_number"
+      },
+      {
+        "example": "Arturo Reyes",
+        "name": "insured_person"
+      },
+      {
+        "example": "09/01/2026",
+        "name": "service_start_date"
+      },
+      {
+        "example": "09/07/2026",
+        "name": "service_end_date"
+      },
+      {
+        "example": "42",
+        "name": "total_care_hours"
+      },
+      {
+        "example": "Rosa Martinez",
+        "name": "caregiver_name"
+      },
+      {
+        "example": "INV-88213",
+        "name": "agency_invoice_number"
+      }
+    ],
+    "recordedSteps": [
+      "Click \"Tollbrook Mutual claims\" <a>",
+      "Navigate to https://ai.nowidevops.com/demo/tollbrook/",
+      "Type \"TLC-4471902\" into \"Policy number Printed on the policy page, e.g. TLC-4471902\"",
+      "Type \"Arturo Reyes\" into \"Insured person\"",
+      "Type \"09/01/2026\" into \"Service start date MM/DD/YYYY\"",
+      "Type \"09/07/2026\" into \"Service end date MM/DD/YYYY\"",
+      "Type \"42\" into \"Total care hours\"",
+      "Type \"Rosa Martinez\" into \"Caregiver name\"",
+      "Type \"INV-88213\" into \"Agency invoice number\"",
+      "Check the \"Care was provided through a licensed home care agency\" box (click it only if it is not already checked)",
+      "Check the \"A daily care log is available if Tollbrook asks for it\" box (click it only if it is not already checked)",
+      "Check the \"I certify this information is accurate\" box (click it only if it is not already checked)",
+      "Click \"Submit claim\" <button>"
+    ],
+    "steps": [
+      "Navigate to https://ai.nowidevops.com/demo/tollbrook/",
+      "Set the Policy number field to {policy_number}",
+      "Set the Insured person field to {insured_person}",
+      "Set the Service start date field to {service_start_date}",
+      "Set the Service end date field to {service_end_date}",
+      "Set the Total care hours field to {total_care_hours}",
+      "Set the Caregiver name field to {caregiver_name}",
+      "Set the Agency invoice number field to {agency_invoice_number}",
+      "Check the \"Care was provided through a licensed home care agency\" box",
+      "Check the \"A daily care log is available if Tollbrook asks for it\" box",
+      "Check the \"I certify this information is accurate\" box",
+      "Click the \"Submit claim\" button"
+    ],
+    "demo": true
+  }
+]

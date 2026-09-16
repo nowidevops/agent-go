@@ -1,13 +1,22 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-product="go">
 <head>
   <meta charset="UTF-8" />
+  <script src="theme-boot.js"></script>
   <title>Microphone permission — Agent Go</title>
   <style>
     body { font-family: "JetBrains Mono", Consolas, monospace; background: #1E1E1E; color: #D4D4D4;
            display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
     .box { max-width: 460px; text-align: center; }
     .ok { color: #4EC9B0; } .bad { color: #F44747; }
+  </style>
+  <link rel="stylesheet" href="theme.css" />
+  <style>
+    /* Redesign layer: same page, theme tokens instead of fixed dark colors */
+    body { font-family: var(--font-ui); background: var(--bg); color: var(--text); padding-inline: 16px; }
+    .box { padding: 28px 24px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); line-height: 1.5; }
+    .box h2 { margin: 0 0 8px; font-size: 18px; }
+    .ok { color: var(--ok); } .bad { color: var(--danger); }
   </style>
 </head>
 <body>

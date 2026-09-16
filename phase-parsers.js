@@ -481,7 +481,7 @@ export const EVIDENCE_TOOLS = new Set([
   // cited the open artifact's title from it; ledger it so "you're on page X" claims
   // are grounded, not flagged unsupported.
   "get_tab_info",
-  // sn_api_reference → {text} (2026-07-20, live a-live-run): the <local path> lookup.
+  // sn_api_reference → {text} (2026-07-20, live a-live-run): the C:\redacted\path
   // CRITICAL — it MUST be citable evidence. When it wasn't, the drafter got the full
   // GlideAggregate method roster from the tool but the ledger stayed EMPTY, so the
   // gates (which judge against the ledger + the SLICED domainPack — the roster sits

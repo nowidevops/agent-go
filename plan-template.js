@@ -3,7 +3,7 @@
 //   • phase-engine.js  (🛡️ CODE-enforced phase engine — PLAN_SYSTEM + EXECUTE)
 //   • implementation-phases-pack.js  (🧭 prompt pipeline pack, when the engine is off)
 //   • servicenow-pack.js  (ServiceNow build directive)
-// Modeled on the production sample <local path>
+// Modeled on the production sample C:\redacted\path
 // No fast-path / "trivial collapse" for actionable work: every use case and every
 // story gets this plan BEFORE the build. Only bare greetings/acks and pure
 // conceptual/definitional questions ("what is X") answer directly (a build plan for

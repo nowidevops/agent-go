@@ -135,7 +135,7 @@ export async function clearSnConnection() { await clearSnConnections(); }
 // e.g. a per-instance sub-agent in a multi-instance fan-out) MUST query THAT tab's
 // instance: its explicit per-tab binding beats the single globally-stored instance.
 // Without this, 5 sub-agents told to hit 5 instances ALL hit the stored instance
-// (UAT 2026-06-21: every child returned dev000000's INC1891961 — only the first was
+// (UAT 2026-06-21: every child returned dev000000's INC0012345 — only the first was
 // actually correct).
 export async function resolveSnTarget(tabOrigin, opts = {}) {
   const conns = await getSnConnections();
@@ -911,8 +911,8 @@ function summarizeDenials(list) {
 // ---------------------------------------------------------------------------
 // FIX SCRIPT route — the owner's own answer to "ServiceNow (MCP) refuses the
 // write" (STRY0000001, 2026-09-02 20:09 UTC: sys_script_fix
-// fe57fcde1b8fcb10773186eae54bcba4 "STRY0000001 Update SCTASK text - R7 User",
-// <local path> WF\). A Fix Script runs server-side GlideRecord under NO table ACLs,
+// 00000000000000000000000000000000 "STRY0000001 Update task text",
+// C:\redacted\path). A Fix Script runs server-side GlideRecord under NO table ACLs,
 // so it changes sys_variable_value / wf_transition / wf_activity rows the Table
 // API (403) and the forms (read-only Value) refuse for the same user. The record
 // itself is creatable through the API or its own form; running it is one

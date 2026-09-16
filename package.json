@@ -1,0 +1,14 @@
+{
+  "name": "agent-go",
+  "version": "0.2.22",
+  "private": true,
+  "type": "module",
+  "description": "Agent Go browser extension - open-source release",
+  "license": "MIT",
+  "scripts": {
+    "test": "for f in *.test.mjs test/*.mjs; do node \"$f\"; c=$?; [ $c -eq 0 ] || [ $c -eq 77 ] || exit 1; done"
+  },
+  "devDependencies": {
+    "jsdom": "^24.0.0"
+  }
+}

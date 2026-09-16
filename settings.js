@@ -8,8 +8,14 @@ export const DEFAULTS = {
   // Agent Go backend base URL (includes the mount path). Defaults to the LOCAL dev-server for
   // pre-launch testing; set the production URL in Options once deployed.
   backendUrl: "https://ai.nowidevops.com/api/llm-go",
-  model: "glm-5.2:cloud",                             // default agent brain (fast; not multimodal)
-  visionModel: "gemma4:31b",                          // paired vision model (Ollama Cloud, fast) for screenshots
+  model: "",                                          // "" = Auto: the service runs kimi-k3:cloud where the plan allows it, glm-5.2:cloud on free (owner 2026-09-15)
+  modelAutoDefaultV1: true, // marker: the glm-5.2:cloud -> Auto default migration has been applied (see getSettings)
+  // Paired vision model for screenshots (Ollama Cloud, flat rate). glm-5.3-flash replaced
+  // gemma4:31b on 2026-09-05: on a real-screenshot bench gemma misread exact strings (version,
+  // prices, dates — Ollama encodes its image into ~350 tokens vs ~2,700 for the others) while
+  // glm-5.3-flash read every figure correctly at ~4s. Same $0.15 flat charge.
+  visionModel: "glm-5.3-flash",
+  visionModelDefaultV2: true, // marker: the gemma4→glm-5.3-flash default migration has been applied (see getSettings)
   temperature: 0.2,
   numCtx: 32768,
   maxSteps: 0,                                        // agent-loop cap; 0 = unlimited (Stop button cancels)
@@ -24,8 +30,9 @@ export const DEFAULTS = {
   // Knowledge packs (ported verbatim; opt-in) — unchanged from Local LLM.
   snPackEnabled: false,  // OFF by default (user request 2026-07-18) — opt-in via Options. When on: real-API rules + artifact form maps + build-in-instance guidance (live sn-api-packs at ai.nowidevops.com, cached 10min; only injects on SN tasks/tabs).
   fablePackEnabled: false,
-  tradingPackEnabled: false,
-  implementationPhasesEnabled: false,
+  tradingPackEnabled: true,             // ON by default (owner directive 2026-09-04); forced OFF for tiers that cannot see the controls
+  implementationPhasesEnabled: true,   // ON by default (owner 2026-09-04); the user can uncheck it in Options
+  implementationPhasesDefaultV2: true, // marker: the on-by-default migration has been applied to this profile (see getSettings)
   phaseEngineEnabled: false,
   phaseModels: {},
   telemetryEnabled: false,
@@ -35,11 +42,17 @@ export const DEFAULTS = {
   phaseFilesUrl: "http://localhost:3000/sdlc-phases", // live ServiceNow/Fable knowledge pack source; falls back to bundled
   wfPackEnabled: false,                 // opt-in: ServiceNow LEGACY (Classic) Workflow pack (workflow_ide.do / wf_* authoring) — overlay on the SN pack
   wfsPackEnabled: false,                // opt-in: ServiceNow Workflow Studio pack (modern flows/subflows/actions, sys_hub_*) — overlay on the SN pack
-  tradingPrefillEnabled: false,         // day-trading Phase 2: the agent may FILL the order form but must NOT click Submit
+  tradingPrefillEnabled: true,          // ON by default (owner directive 2026-09-04). day-trading Phase 2: the agent may FILL the order form but must NOT click Submit
   scalpingPackEnabled: false,           // opt-in: SCALPING overlay for the day-trading pack; only injects when tradingPackEnabled
+  // ── REAL-MONEY live-trading pack (2026-09-11) — SEPARATE from the paper pack above; every flag OFF by default ──
+  liveTradingPackEnabled: false,        // opt-in: inject the REAL-MONEY live-trading agent pack — ACTIVE-TAB-gated to live-trading.html only (never task-text / open-tab triggered). Analyze-only until the two flags below are also on.
+  liveTradingPrefillEnabled: false,     // opt-in: live pack may FILL the order form (a human clicks Submit). Requires liveTradingPackEnabled.
+  liveScalpingPackEnabled: false,       // opt-in: scalping overlay for the LIVE pack (own precedence header, own served file live-scalping-strategy.md). Only rides on an injected live pack.
+  liveRiskPostureEnabled: true,         // set_session_max_loss on the LIVE page (TIGHTEN-ONLY on the live module's own cap). Default ON because it can only reduce risk.
   riskPostureEnabled: true,             // day-trading set_session_max_loss tool (TIGHTEN-ONLY session cap; server enforces)
   additionalExcludedSymbols: [],        // ADDITIVE day-trade exclusions (merged with trading-pack.js's long-term-holding list)
   m1PackEnabled: false,                 // opt-in: M1 Finance portfolio explorer pack — REAL-MONEY 401(k), FORCED read-only; URL-gated to dashboard.m1.com
+  inboxPackEnabled: false,              // opt-in: inject the Gmail / Outlook inbox triage + reply DRAFTER pack — URL-gated to mail.google.com / outlook.office.com; read + draft only, sends gated by the exact approval phrase (and send_email/send_sms blocked in code)
   teamsPackEnabled: false,              // opt-in: Microsoft Teams READ-ONLY reply-drafter pack — URL-gated to teams.cloud.microsoft / teams.microsoft.com
   slackPackEnabled: false,              // opt-in: Slack READ-ONLY reply-drafter pack — URL-gated to app.slack.com / slack.com
   unslopPackEnabled: true,              // DEFAULT ON (owner directive 2026-08-19): unslop writing-quality pack on EVERY run
@@ -108,6 +121,42 @@ export async function getSettings() {
   try {
     const { settings } = await chrome.storage.sync.get("settings");
     const merged = normalize({ ...DEFAULTS, ...(settings || {}) });
+    // One-time migration (2026-09-04): profiles saved under the old default carry
+    // implementationPhasesEnabled:false without ever having chosen it. Flip them ON once and
+    // stamp the marker; every later save keeps the marker, so an explicit uncheck sticks.
+    const migration = {};
+    if (settings && !settings.implementationPhasesDefaultV2) {
+      migration.implementationPhasesEnabled = true;
+      migration.implementationPhasesDefaultV2 = true;
+    }
+    // One-time migration (2026-09-05): profiles that stored the old vision default "gemma4:31b"
+    // without ever having chosen it move to glm-5.3-flash once and get the marker; a profile
+    // that picked another model, or re-picks gemma4 after the stamp, is kept. (A missing value
+    // already resolves to the new default through normalize(), so it needs no write.)
+    if (settings && !settings.visionModelDefaultV2 && settings.visionModel === "gemma4:31b") {
+      migration.visionModel = DEFAULTS.visionModel;
+      migration.visionModelDefaultV2 = true;
+    }
+    // One-time migration (2026-09-15): profiles still on the old default agent model move to Auto,
+    // which the service resolves to Kimi K3 where the plan includes it and GLM 5.2 on Free and Starter. A profile that picked
+    // another model, or re-picks glm-5.2:cloud after the stamp (every save carries it), is kept.
+    if (settings && !settings.modelAutoDefaultV1 && settings.model === "glm-5.2:cloud") {
+      migration.model = "";
+      migration.modelAutoDefaultV1 = true;
+    }
+    if (Object.keys(migration).length) { // every pending migration lands in ONE write
+      Object.assign(merged, migration);
+      try {
+        // Re-read right before writing so a save made by another page since the first read is kept,
+        // and apply only the migrations that still hold on that fresh copy.
+        const fresh = (await chrome.storage.sync.get("settings")).settings || settings;
+        const apply = {};
+        if (migration.implementationPhasesDefaultV2 && !fresh.implementationPhasesDefaultV2) Object.assign(apply, { implementationPhasesEnabled: true, implementationPhasesDefaultV2: true });
+        if (migration.visionModelDefaultV2 && !fresh.visionModelDefaultV2 && fresh.visionModel === "gemma4:31b") Object.assign(apply, { visionModel: DEFAULTS.visionModel, visionModelDefaultV2: true });
+        if (migration.modelAutoDefaultV1 && !fresh.modelAutoDefaultV1 && fresh.model === "glm-5.2:cloud") Object.assign(apply, { model: "", modelAutoDefaultV1: true });
+        if (Object.keys(apply).length) await chrome.storage.sync.set({ settings: { ...fresh, ...apply } });
+      } catch (e) { console.warn("[settings] default migration not persisted:", e && e.message); }
+    }
     // desktopToken + byokApiKey are MACHINE-LOCAL secrets — storage.local, never sync.
     const { desktopToken, byokApiKey } = await chrome.storage.local.get(["desktopToken", "byokApiKey"]);
     if (desktopToken) merged.desktopToken = desktopToken;
@@ -158,7 +207,8 @@ export async function saveCloudCreds() {
 export async function getSubmitEnabled() {
   try {
     const { paperOrderSubmissionEnabled } = await chrome.storage.local.get("paperOrderSubmissionEnabled");
-    return !!paperOrderSubmissionEnabled;
+    // ON by default (owner directive 2026-09-04); an explicit false in storage.local is the kill-switch.
+    return paperOrderSubmissionEnabled === undefined ? true : !!paperOrderSubmissionEnabled;
   } catch {
     return false;
   }
@@ -166,6 +216,23 @@ export async function getSubmitEnabled() {
 export async function saveSubmitEnabled(on) {
   await chrome.storage.local.set({ paperOrderSubmissionEnabled: !!on });
   return !!on;
+}
+
+// REAL-MONEY autonomous-submit kill-switch (2026-09-11) — storage.LOCAL, never sync, and
+// DEFAULT OFF (unlike the paper switch): only an explicit true in storage.local enables the
+// live pack's SUBMIT mode. Enabling autonomy on one machine never propagates to another.
+export async function getLiveSubmitEnabled() {
+  try {
+    const { liveOrderSubmissionEnabled } = await chrome.storage.local.get('liveOrderSubmissionEnabled');
+    return liveOrderSubmissionEnabled === true;
+  } catch {
+    return false;
+  }
+}
+
+export async function saveLiveSubmitEnabled(on) {
+  await chrome.storage.local.set({ liveOrderSubmissionEnabled: on === true });
+  return on === true;
 }
 
 // Phase-engine per-place model-exclusion hook (ported verbatim from Local LLM). No blanket

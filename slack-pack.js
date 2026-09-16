@@ -12,7 +12,7 @@
 // the send arrow, then a read-back verification. These constraints are part of
 // the pack body and must be preserved verbatim — they are the load-bearing
 // safety lines.
-// Source: <local path> PROMPTS\SLACK AUTO-REPLY.txt.
+// Source: C:\redacted\path
 //
 // Author: iDevOpsLLC
 

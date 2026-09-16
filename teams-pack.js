@@ -8,7 +8,7 @@
 // phrase "APPROVED — SEND IT". The hard approval gate + the never-press-Enter /
 // never-click-Post rules are part of the pack body and must be preserved verbatim
 // — they are the load-bearing safety lines (UAT 12/12 passed, 1 withheld by design).
-// Source: <local path> PROMPTS\TEAMS_AUTO_REPLY.txt (v8).
+// Source: C:\redacted\path).
 //
 // Author: iDevOpsLLC
 

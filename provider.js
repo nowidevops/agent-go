@@ -5,7 +5,7 @@
 
 import { llmgoChatStream, llmgoDescribe } from "./providers.js";
 import { getAuthToken } from "./auth.js";
-import { getByok } from "./settings.js";
+import { getByok, DEFAULTS } from "./settings.js";
 
 // Agent Go collapses to a single cloud provider.
 export function activeProvider() { return "llmgo"; }
@@ -33,6 +33,7 @@ export async function chatStream(args) {
     tools: args.tools,
     turnId: args.turnId,
     taskTurnCount: args.taskTurnCount,
+    purpose: args.purpose,
     signal: args.signal,
     onToken: args.onToken,
     onUsage: s.onUsage || args.onUsage
@@ -45,5 +46,5 @@ export async function chatStream(args) {
 export async function describe({ settings, prompt, base64, signal }) {
   const s = settings || {};
   const token = await getAuthToken();
-  return llmgoDescribe({ backendUrl: s.backendUrl, token, model: s.visionModel || "gemma4:31b", prompt, base64, signal });
+  return llmgoDescribe({ backendUrl: s.backendUrl, token, model: s.visionModel || DEFAULTS.visionModel, prompt, base64, signal });
 }

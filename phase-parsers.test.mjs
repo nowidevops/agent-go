@@ -429,7 +429,7 @@ console.log("— build-in-instance re-tag —");
 
 // save_record as PERSISTENCE evidence (2026-07-20, live SN export a-live-run) —
 // a successful save is a citable observation; the "unsaved stub" fabrication dies.
-// sn_api_reference as CITABLE evidence (2026-07-20, live a-live-run) — the <local path>
+// sn_api_reference as CITABLE evidence (2026-07-20, live a-live-run) — the C:\redacted\path
 // roster the tool returns must be ledgered + chunked so the drafter can cite it and
 // the gates verify it (else a correct roster reads as "fabrication" and gets cut to 3).
 console.log("— sn_api_reference citable evidence —");

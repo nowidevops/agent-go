@@ -34,7 +34,7 @@ function sleepAbortable(ms, signal) {
   });
 }
 
-export async function llmgoChatStream({ backendUrl, token, model, messages, tools, turnId, taskId, byok, signal, onToken, onUsage }) {
+export async function llmgoChatStream({ backendUrl, token, model, messages, tools, turnId, taskId, byok, purpose, signal, onToken, onUsage }) {
   if (!backendUrl) throw new Error("Agent Go: backend URL not configured (Options → Account).");
   if (!token) { const e = new Error(NOT_SIGNED_IN_STEPS); e.code = 401; throw e; }
 
@@ -78,7 +78,9 @@ export async function llmgoChatStream({ backendUrl, token, model, messages, tool
     res = await fetch(`${backendUrl.replace(/\/$/, "")}/v1/chat`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ model, messages, tools, stream: true }),
+      // `purpose` tags a call the backend prices on its own terms (e.g. "prompt_builder" = free,
+      // included model, no tools); absent on normal agent turns.
+      body: JSON.stringify(purpose ? { model, messages, tools, stream: true, purpose } : { model, messages, tools, stream: true }),
       signal: reqSignal
     });
     if (res.status === 503 && attempt < MAX_503_RETRIES && !reqSignal.aborted) {

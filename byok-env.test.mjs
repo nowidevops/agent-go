@@ -67,8 +67,8 @@ t("quoted value + trailing comma keeps no quotes", parseEnv("OPENAI_API_KEY='" +
 t("unquoted value + trailing comma", parseEnv("OPENAI_API_KEY=" + K("sk") + ",").OPENAI_API_KEY === K("sk"));
 t("azure openai key is not an openai key", pickEnvKey({ AZURE_OPENAI_API_KEY: "a".repeat(32) }, "openai") === "");
 t("key URL is not a key", pickEnvKey({ OPENAI_KEY_URL: "https://vault.example.com/openai/key" }, "openai") === "");
-t("key file path is not a key", pickEnvKey({ GEMINI_KEY_FILE: "/home/me/.secrets/gemini.key.txt" }, "gemini") === "");
-t("windows path is not a key", pickEnvKey({ ANTHROPIC_KEY_PATH: String.raw`<local path>` }, "anthropic") === "");
+t("key file path is not a key", pickEnvKey({ GEMINI_KEY_FILE: "<local path>" }, "gemini") === "");
+t("windows path is not a key", pickEnvKey({ ANTHROPIC_KEY_PATH: String.raw`C:\redacted\path` }, "anthropic") === "");
 t("secret ref is not a key", pickEnvKey({ ANTHROPIC_SECRET_NAME: "projects/123456/secrets/anthropic-key/versions/1" }, "anthropic") === "");
 t("shell reference is not a key", pickEnvKey({ OPENAI_API_KEY: "${OPENAI_API_KEY_FROM_VAULT}" }, "openai") === "");
 t("sk-xxx placeholder rejected", pickEnvKey({ OPENAI_API_KEY: "sk-" + "x".repeat(40) }, "openai") === "");

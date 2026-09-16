@@ -29,6 +29,38 @@ const CONTEXT_MAX_CHARS = 3000; // transcript tail attached to prompts (local-mo
 let cb = null;                 // { run, bubble, isBusy, inputEl } injected by sidepanel.js
 let suppressCtxOnce = false;   // participation prompts already embed the transcript
 
+// Self-echo guard (master-mind 6aa946fb, must fix): with "speak" on, the reply
+// plays through the speakers and comes back through the mic or shared audio
+// as a transcript line. If that line contains the wake word, or ends in "?"
+// with no trigger set, the listener would answer itself in a loop. While our
+// own speech plays, and for one chunk plus transcription lag after it ends,
+// heard lines are still written to the transcript but never start a run.
+const ECHO_QUIET_MS = CHUNK_MS + 8000;
+const TTS_MS_PER_CHAR = 90;    // generous speech-length estimate at 1x, used only as an upper bound
+let ttsQuietUntil = 0;
+let ttsTurn = 0;
+let ttsCurrent = null;         // Chrome can garbage-collect an unreferenced utterance before its onend fires
+
+export function armSelfEcho(utterance, chars = 0, rate = 1) {
+  const turn = ++ttsTurn;
+  ttsCurrent = utterance;
+  // Closed until this utterance ends. If onend never fires (a Chrome stall), the window still opens after the
+  // estimated speech length plus the echo lag, instead of muting participation for the rest of the session;
+  // speechSynthesis.speaking keeps it closed while speech really is still playing.
+  const r = Number(rate) > 0 ? Number(rate) : 1;
+  ttsQuietUntil = Date.now() + Math.ceil((Math.max(0, chars) * TTS_MS_PER_CHAR) / r) + ECHO_QUIET_MS;
+  const done = () => { if (turn === ttsTurn) { ttsCurrent = null; ttsQuietUntil = Date.now() + ECHO_QUIET_MS; } };
+  utterance.onend = done;
+  utterance.onerror = done;
+}
+
+export function clearSelfEcho() { ttsTurn++; ttsCurrent = null; ttsQuietUntil = 0; }
+
+export function inSelfEchoWindow(now = Date.now()) {
+  const speaking = typeof speechSynthesis !== "undefined" && !!speechSynthesis.speaking;
+  return speaking || now < ttsQuietUntil;
+}
+
 // ---------- shared helpers ----------
 
 function pickMime() {
@@ -45,14 +77,35 @@ async function whisperHealthy(base) {
   } catch { return false; }
 }
 
-async function whisperTranscribe(base, blob) {
-  const fd = new FormData();
-  fd.append("audio", blob, "chunk.webm");
-  const res = await fetch(base + "/transcribe", { method: "POST", body: fd, signal: AbortSignal.timeout(60000) });
-  if (!res.ok) throw new Error("Whisper HTTP " + res.status);
-  const j = await res.json();
-  if (j.error) throw new Error(j.error);
-  return String(j.text || "").trim();
+// The Whisper server runs one transcription at a time and answers a second
+// concurrent request with 429. "Both" (Meeting + Mic) finishes a chunk per
+// source on the same timer, so calls are queued here, one after another, and a
+// 429 caused by some other client (e.g. dictation in another panel) is retried
+// with a short backoff instead of dropping that chunk.
+const WHISPER_BUSY_RETRIES = 6;
+let whisperQueue = Promise.resolve();
+
+export function whisperTranscribe(base, blob) {
+  const job = whisperQueue.then(() => whisperTranscribeNow(base, blob));
+  whisperQueue = job.catch(() => {}); // one failed chunk must not block the next
+  return job;
+}
+
+async function whisperTranscribeNow(base, blob) {
+  for (let attempt = 0; ; attempt++) {
+    const fd = new FormData();
+    fd.append("audio", blob, "chunk.webm");
+    const res = await fetch(base + "/transcribe", { method: "POST", body: fd, signal: AbortSignal.timeout(60000) });
+    if (res.status === 429 && attempt < WHISPER_BUSY_RETRIES) {
+      try { res.body?.cancel()?.catch(() => {}); } catch {} // release the refused response before retrying
+      await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+      continue;
+    }
+    if (!res.ok) throw new Error("Whisper HTTP " + res.status);
+    const j = await res.json();
+    if (j.error) throw new Error(j.error);
+    return String(j.text || "").trim();
+  }
 }
 
 // Mic access. In a side panel Chrome sometimes rejects getUserMedia without
@@ -74,6 +127,16 @@ function stamp() {
   const d = new Date();
   const p = (n) => String(n).padStart(2, "0");
   return p(d.getHours()) + ":" + p(d.getMinutes());
+}
+
+// Does a transcribed chunk address the assistant? With a trigger phrase: the
+// phrase appears as whole words, ignoring case and punctuation (Whisper writes
+// "Hey, Assistant." as often as "hey assistant"). Without one: the chunk ends
+// in a direct question.
+export function triggerHit(text, trigger) {
+  const words = (s) => " " + String(s || "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim() + " ";
+  const trig = words(trigger).trim();
+  return trig ? words(text).includes(" " + trig + " ") : /\?\s*$/.test(String(text || "").trim());
 }
 
 function stripForSpeech(md) {
@@ -210,6 +273,7 @@ const listen = {
   whisperUrl: "",
   startedAt: 0,
   queued: null,     // participation request deferred while the agent was busy
+  session: 0,       // bumped per start; chunks queued by an earlier session are dropped
   prefs: { participate: false, speak: false, trigger: "hey assistant", rate: 1 },
 };
 
@@ -247,8 +311,9 @@ export function maybeSpeak(text) {
     // Web Speech accepts rate 0.1–10; clamp to the strip's 0.5–2 range.
     const r = Number(listen.prefs.rate);
     u.rate = Number.isFinite(r) ? Math.min(2, Math.max(0.5, r)) : 1;
+    armSelfEcho(u, clean.length, u.rate); // after cancel(): a cancelled utterance's late onend belongs to an older turn and is ignored
     speechSynthesis.speak(u);
-  } catch {}
+  } catch { clearSelfEcho(); }
 }
 
 function savePrefs() {
@@ -272,22 +337,26 @@ function appendLine(label, text) {
 }
 
 // One recorder cycle for one source: record CHUNK_MS, stop for a complete webm
-// blob, immediately start the next cycle, transcribe this blob in parallel.
+// blob, immediately start the next cycle, and queue this blob for transcription
+// (whisperTranscribe runs one call at a time). A result that arrives after this
+// listening session ended belongs to no transcript and is dropped.
 function startCycle(src) {
   if (!listen.active) return;
+  const session = listen.session;
   const rec = new MediaRecorder(src.stream, { mimeType: pickMime() });
   src.rec = rec;
   const parts = [];
   rec.ondataavailable = (e) => { if (e.data && e.data.size) parts.push(e.data); };
   rec.onstop = async () => {
-    if (listen.active) startCycle(src);
+    if (listen.active && session === listen.session) startCycle(src);
     const blob = new Blob(parts, { type: rec.mimeType });
     if (blob.size < MIN_BLOB_BYTES) return; // silence
     try {
       const text = await whisperTranscribe(listen.whisperUrl, blob);
+      if (session !== listen.session) return; // a newer session started while this chunk was queued
       if (text) onChunkText(src.label, text);
     } catch (e) {
-      appendLine("system", "⚠ transcription failed: " + (e.message || e));
+      if (session === listen.session) appendLine("system", "⚠ transcription failed: " + (e.message || e));
     }
   };
   rec.start();
@@ -296,6 +365,10 @@ function startCycle(src) {
 
 function onChunkText(label, text) {
   appendLine(label, text);
+  // The final chunks still transcribe after Stop (so the transcript is complete), but they must never start a run.
+  if (!listen.active) return;
+  // Our own spoken reply heard back: keep the line, never act on it (and never let it release a deferred run).
+  if (inSelfEchoWindow()) return;
   // Deferred participation first: the agent was busy when the trigger fired.
   if (listen.queued && !cb.isBusy()) {
     const latest = listen.queued;
@@ -304,10 +377,7 @@ function onChunkText(label, text) {
     return;
   }
   if (!listen.prefs.participate) return;
-  const trig = String(listen.prefs.trigger || "").trim().toLowerCase();
-  // With a trigger phrase: respond when addressed. Without one: respond to a
-  // chunk that ends in a direct question.
-  const hit = trig ? text.toLowerCase().includes(trig) : /\?\s*$/.test(text.trim());
+  const hit = triggerHit(text, listen.prefs.trigger);
   if (!hit) return;
   if (cb.isBusy()) { listen.queued = text; appendLine("system", "⏳ trigger heard — waiting for the current run to finish"); return; }
   launchParticipation(text);
@@ -404,6 +474,7 @@ async function startListening(kind) {
     return;
   }
 
+  listen.session++;
   listen.active = true;
   listen.sources = sources;
   listen.transcript = [];
@@ -442,6 +513,7 @@ export function stopListening() {
   listen.sources = [];
   if (listen.audioCtx) { try { listen.audioCtx.close(); } catch {} listen.audioCtx = null; }
   try { speechSynthesis.cancel(); } catch {}
+  clearSelfEcho();
   if (listen.card) {
     const mins = Math.max(1, Math.round((Date.now() - listen.startedAt) / 60000));
     const n = document.createElement("div");
@@ -503,6 +575,8 @@ export async function initListen(callbacks) {
   trig.value = listen.prefs.trigger || "";
   part.addEventListener("change", () => { listen.prefs.participate = part.checked; savePrefs(); });
   speak.addEventListener("change", () => { listen.prefs.speak = speak.checked; savePrefs(); });
+  // The wake word is live: the next transcribed chunk uses what is typed now, and it is kept for the next session.
+  trig.addEventListener("input", () => { listen.prefs.trigger = trig.value; savePrefs(); });
   if (rate) rate.addEventListener("change", () => {
     const r = parseFloat(rate.value);
     listen.prefs.rate = Number.isFinite(r) ? r : 1;

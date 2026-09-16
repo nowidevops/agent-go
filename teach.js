@@ -142,12 +142,21 @@ export async function teachStop(narration, settings) {
     workflow.eventCount = events.length;
     workflow.recordedSteps = recordedSteps;            // raw, ungeneralized capture
     workflow.narration = (narration || "").slice(0, 1000);
-    const list = await getWorkflows(); // returns a name-deduped list
-    workflow.name = uniqueName(workflow.name, list); // no two workflows share a name
-    list.push(workflow);
-    await chrome.storage.local.set({ teachWorkflows: list.slice(-50) });
+    // At the cap, refuse the save instead of silently dropping the oldest saved row (Master-Mind 6aa7700c B2).
+    const saved = await withWorkflowsLock(async () => {
+      const list = await readWorkflowList(); // returns a name-deduped list
+      if (list.length >= WORKFLOW_CAP) return false;
+      workflow.name = uniqueName(workflow.name, list); // no two workflows share a name
+      list.push(workflow);
+      await chrome.storage.local.set({ teachWorkflows: list });
+      return true;
+    });
+    if (!saved) {
+      return { ok: false, saved: false, workflow, eventCount: events.length,
+        error: `Not saved: you already have ${WORKFLOW_CAP} saved workflows. Delete one in Settings, then record again.` };
+    }
   }
-  return { ok: true, workflow, eventCount: events.length };
+  return { ok: true, saved: !!workflow, workflow, eventCount: events.length };
 }
 
 // First sensible title from a raw demo: the first click/field label, else the
@@ -164,13 +173,28 @@ function deriveName(events) {
 }
 
 // Collapse noisy repeats: successive inputs on the same field keep only the last.
-function dedupeEvents(events) {
+const TOGGLE_ACTIONS = new Set(["check", "uncheck"]);
+export function dedupeEvents(events) {
   const out = [];
   for (const e of events) {
     const prev = out[out.length - 1];
     const key = (x) => x?.target?.recId || x?.target?.id || x?.target?.name || x?.target?.label || x?.target?.text;
+    const shown = (x) => x?.target?.label || x?.target?.text;
+    // Same shown text only ties a click to a field when the click was NOT on a button or link: a
+    // "Search" button that opens a box labelled "Search" is a separate step replay needs.
+    const sameShown = (p, x) => !/^(a|button)$/i.test(p?.target?.tag || "") && shown(p) && shown(p) === shown(x);
     if (prev && (e.action === "input" || e.action === "select") && prev.action === e.action && key(prev) === key(e)) {
       out[out.length - 1] = e; // keep latest value for the same field
+    } else if (prev && prev.action === "click" && (e.action === "input" || e.action === "select") &&
+        (key(prev) === key(e) || sameShown(prev, e))) {
+      // Clicking into a field and then typing into it (or picking an option) is one step: keep the value.
+      out[out.length - 1] = e;
+    } else if (prev && TOGGLE_ACTIONS.has(e.action) &&
+        (TOGGLE_ACTIONS.has(prev.action) || prev.action === "click") &&
+        (key(prev) === key(e) || (prev.action === "click" && sameShown(prev, e)))) {
+      // The click that ticked a box (on the box or its label) and any repeat change/input events
+      // for it are ONE gesture: keep the final checked state.
+      out[out.length - 1] = e;
     } else if (prev && e.action === "navigate" && prev.action === "navigate" && prev.url === e.url) {
       // skip duplicate navigate
     } else {
@@ -188,6 +212,9 @@ export function eventToStepLine(e) {
   if (e.action === "navigate") return `Navigate to ${e.url}`;
   if (e.action === "input") return `Type "${e.value}" into "${label}"`;
   if (e.action === "select") return `Choose "${e.value}" in dropdown "${label}"`;
+  // Idempotent wording: a replay on a page that remembers filters must not untick a box.
+  if (e.action === "check") return `Check the "${label}" box (click it only if it is not already checked)`;
+  if (e.action === "uncheck") return `Uncheck the "${label}" box (click it only if it is currently checked)`;
   return `Click "${label}"${t.tag ? ` <${t.tag}>` : ""}`;
 }
 
@@ -288,6 +315,7 @@ ${log}
 
 Rules:
 - Generalize specifics into PARAMETERS (e.g. a person's name, an incident number, a search term become {caller}, {number}). Constant navigation/UI steps stay literal.
+- Checking or unchecking a box, picking a filter, and clicking a button or link are CONSTANT steps. Keep them literal ("Check the \\"CSM\\" box"). Only text the user TYPED can become a parameter; never turn a checkbox label into one.
 - Each step is one imperative instruction referencing parameters with {curly_braces}.
 - Use the narration to clarify intent and naming.
 
@@ -310,17 +338,111 @@ Output ONLY a JSON object:
   }
 }
 
-export async function getWorkflows() {
+// Every writer of teachWorkflows (recording save, delete, clear all, demo seeding) runs under one Web Lock, so the
+// options page, the side panel and the service worker can't overwrite each other's read-modify-write
+// (Master-Mind 6aa769f6 #4). Runs directly where navigator.locks is missing (tests).
+const WORKFLOWS_LOCK = "agent-go-teach-workflows";
+function withWorkflowsLock(fn) {
+  const locks = globalThis.navigator && globalThis.navigator.locks;
+  return locks && typeof locks.request === "function" ? locks.request(WORKFLOWS_LOCK, fn) : fn();
+}
+async function readWorkflowList() {
   const { teachWorkflows } = await chrome.storage.local.get("teachWorkflows");
-  const list = teachWorkflows || [];
+  const list = Array.isArray(teachWorkflows) ? teachWorkflows : [];
   // Heal any pre-existing duplicate names once; no-op (no write) afterward.
   if (dedupeNames(list)) await chrome.storage.local.set({ teachWorkflows: list });
   return list;
 }
+// readWorkflowList's dedupe heal is a write, so outside readers take the lock too (Master-Mind 6aa7700c B1).
+// Never call getWorkflows from inside withWorkflowsLock: Web Locks are not reentrant.
+export async function getWorkflows() {
+  return withWorkflowsLock(() => readWorkflowList());
+}
 export async function deleteWorkflow(id) {
-  const list = await getWorkflows();
-  await chrome.storage.local.set({ teachWorkflows: list.filter((w) => w.id !== id) });
+  return withWorkflowsLock(async () => {
+    const list = await readWorkflowList();
+    await chrome.storage.local.set({ teachWorkflows: list.filter((w) => w.id !== id) });
+  });
 }
 export async function clearWorkflows() {
-  await chrome.storage.local.set({ teachWorkflows: [] });
+  return withWorkflowsLock(() => chrome.storage.local.set({ teachWorkflows: [] }));
+}
+
+// Demo workflows (2026-09-14, hardened after Master-Mind 6aa769f6). demo-workflows.json holds the two workflows from
+// the Saved workflows video (caregiver search, home care claim). They open the public, fictional demo pages at
+// https://ai.nowidevops.com/demo/, so anyone can run them. Seeded rows carry demo: true and show a Demo badge.
+// - Release build (manifest has the stamped key): added once per DEMO_SEED_VERSION. A demo the user deletes stays
+//   deleted. DEMO_SEED_VERSION is unchanged from 1.0.12 / 0.2.18 so those users keep their deletions.
+// - Owner's dev copy (unpacked, no key): permanent for demo use; every load puts back a missing demo.
+// Both: add all missing demos or none, and never past the 50-workflow cap (a user's own workflows are never pushed out);
+// rewrite old http://localhost:8899/ steps, but only on rows that are our demos; set the flag only once every demo
+// is present, in the same write as the list.
+const DEMO_SEED_VERSION = "saved-workflows-video-2026-09-14-public";
+const DEMO_OLD_BASE = "http://localhost:8899/";
+const WORKFLOW_CAP = 50;
+// A saved row is one of our demos when it carries the marker, or (rows added by 1.0.12 / 0.2.18, before the marker)
+// when its name, description and step count are exactly the shipped demo's.
+function demoFor(w, byName, byId) {
+  if (!w) return null;
+  // A marked row matches by its shipped id first, so a demo stored as "Name (2)" is still ours.
+  if (w.demo === true && w.demoId && byId && byId.has(w.demoId)) return byId.get(w.demoId);
+  const fresh = byName.get(String(w.name || "").toLowerCase());
+  if (!fresh) return null;
+  if (w.demo === true) return fresh;
+  const legacyCopy = w.description === fresh.description && Array.isArray(w.steps) && w.steps.length === fresh.steps.length;
+  return legacyCopy ? fresh : null;
+}
+export async function seedDemoWorkflows() {
+  try {
+    const manifest = chrome.runtime.getManifest ? chrome.runtime.getManifest() : {};
+    const releaseBuild = !!(manifest && manifest.key);
+    const res = await fetch(chrome.runtime.getURL("demo-workflows.json"));
+    if (!res.ok) return { added: 0 };
+    const incoming = await res.json();
+    const valid = (Array.isArray(incoming) ? incoming : []).filter((w) => w && w.name && Array.isArray(w.steps) && w.steps.length);
+    if (!valid.length) return { added: 0, error: "demo-workflows.json holds no usable workflow" };
+    const byName = new Map(valid.map((w) => [String(w.name).toLowerCase(), w]));
+    const byId = new Map(valid.filter((w) => w.id).map((w) => [w.id, w]));
+    return await withWorkflowsLock(async () => {
+      const list = await readWorkflowList();
+      const { demoWorkflowsSeeded } = await chrome.storage.local.get("demoWorkflowsSeeded");
+      let added = 0, repointed = 0, marked = 0;
+      // Canonical names of the demos already in the list. A user's own row that only shares a demo's name does not
+      // count, so it can't hide the demo or latch the flag (Master-Mind 6aa7700c B3).
+      const ours = new Set();
+      for (const w of list) {
+        const fresh = demoFor(w, byName, byId);
+        if (!fresh) continue;
+        ours.add(String(fresh.name).toLowerCase());
+        if (w.demo !== true) { w.demo = true; w.demoId = fresh.id; marked++; }
+        if (JSON.stringify([w.steps || [], w.recordedSteps || []]).includes(DEMO_OLD_BASE)) {
+          w.steps = fresh.steps.slice();
+          if (Array.isArray(fresh.recordedSteps)) w.recordedSteps = fresh.recordedSteps.slice();
+          repointed++;
+        }
+      }
+      const missing = [...byName].filter(([key]) => !ours.has(key));
+      const mayAdd = !releaseBuild || demoWorkflowsSeeded !== DEMO_SEED_VERSION;
+      const fits = list.length + missing.length <= WORKFLOW_CAP;
+      if (mayAdd && missing.length && fits) {
+        for (const [key, w] of missing) {
+          list.push({ ...w, name: uniqueName(w.name, list), id: crypto.randomUUID(), created: Date.now(), demo: true, demoId: w.id });
+          ours.add(key);
+          added++;
+        }
+      }
+      const allPresent = [...byName.keys()].every((key) => ours.has(key));
+      const latch = allPresent && demoWorkflowsSeeded !== DEMO_SEED_VERSION;
+      const changed = added + repointed + marked > 0;
+      if (changed || latch) {
+        const patch = {};
+        if (changed) patch.teachWorkflows = list;
+        if (latch) patch.demoWorkflowsSeeded = DEMO_SEED_VERSION;
+        await chrome.storage.local.set(patch);
+      }
+      return { added, repointed, marked, mode: releaseBuild ? "release-once" : "dev-always", skippedFull: mayAdd && missing.length > 0 && !fits };
+    });
+  } catch (e) {
+    return { added: 0, error: String((e && e.message) || e) };
+  }
 }

@@ -1,5 +1,5 @@
 // conv-log.js — continuous conversation logging to a user-picked local folder
-// (e.g. <local path> LLM TRAINING\conversations), so every conversation becomes
+// (e.g. C:\redacted\path), so every conversation becomes
 // training material for reinforcing the extension's learning. Author: iDevOpsLLC
 //
 // A Chrome extension cannot write to an arbitrary OS path, so (exactly like the
@@ -35,7 +35,7 @@ const CONV_NAME = "conv-" + pad(startedAt.getHours()) + pad(startedAt.getMinutes
 // these patterns are grouped into "YYYY-MM-DD-<model>" folders (":tag"
 // stripped) instead of the plain day folder, so a new model's corpus can be
 // scored in isolation with training/analyze-conversations.mjs — e.g.
-// <local path> LLM TRAINING\conversations\2026-08-20-ornith-1.5.
+// C:\redacted\path
 // Add a pattern here when evaluating a new model; remove it once settled.
 const TRACKED_MODELS = [/^ornith-1\.5/];
 // Locked at the FIRST save of the session (from the model selected then), so a

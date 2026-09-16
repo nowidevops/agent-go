@@ -155,7 +155,7 @@ export function normalizeSnPolarisUrl(urlString) {
   }
 }
 
-// POLARIS WRAPPER for bare classic .do targets (2026-08-02, live INC1926570 run
+// POLARIS WRAPPER for bare classic .do targets (2026-08-02, live INC0012345 run
 // on customer-dev: navigating <origin>/sys_assignment_rule_list.do rendered the SN
 // "Page not found" page, and the agent burned 6 tool calls — re-read, wrapper
 // guess, sys_db_object label-browsing — before ever seeing the list). The
@@ -373,7 +373,7 @@ async function fetchSnApiPack(settings, file) {
 }
 
 // ---------------------------------------------------------------------------
-// ON-DEMAND API-REFERENCE LOOKUP (2026-07-20) — <local path> (the official
+// ON-DEMAND API-REFERENCE LOOKUP (2026-07-20) — C:\redacted\path
 // ServiceNow API Reference) made queryable IN EVERY PHASE so all models share
 // ONE source of truth. Tool-capable phases (EXECUTE, repair-execute) call the
 // `sn_api_reference` tool with a free-text query; the tool-less gate phases
@@ -382,7 +382,7 @@ async function fetchSnApiPack(settings, file) {
 // to grow coverage with NO code change), then a built-in method/artifact index,
 // then a broad-platform default; it NEVER returns empty (bundled core rules are
 // the last resort when the pack server is down). The corpus files are the
-// PyMuPDF extractions of <local path>
+// PyMuPDF extractions of C:\redacted\path
 // ---------------------------------------------------------------------------
 
 // API-method / class → pack, so a query naming a METHOD (not an artifact type)
@@ -458,7 +458,7 @@ export async function lookupSnApiReference(settings, query, artifactHint = "") {
       ? manifest.map((r) => `- ${r.file} — ${r.title || r.artifact || r.file}`)
       : [...new Set(Object.entries(SN_API_PACK_MAP).map(([a, f]) => `- ${f} — ${a.replace(/_/g, " ")}`))].concat(`- ${SN_API_PACK_DEFAULT} — core platform / Glide`);
     return { ok: true, mode: "index",
-      source: "<local path> (official ServiceNow API Reference — AUTHORITATIVE)",
+      source: "C:\\redacted\\path)",
       available: rows.join("\n"),
       note: "Call sn_api_reference again with a specific query (an API method/class/table/event or artifact type) to pull that reference's authoritative text." };
   }
@@ -466,21 +466,21 @@ export async function lookupSnApiReference(settings, query, artifactHint = "") {
   const text = await fetchSnApiPack(settings, pick.file);
   if (text) {
     return { ok: true, mode: "lookup", query: q, artifact: pick.artifact || undefined, file: pick.file, resolved_by: pick.why,
-      source: "<local path> (official ServiceNow API Reference — AUTHORITATIVE; this text OVERRIDES memory)", text };
+      source: "C:\\redacted\\path)", text };
   }
   // Pack server unreachable — return bundled core rules so the model is never
   // left ungrounded (honest about the degraded source).
   return { ok: true, mode: "fallback", query: q, file: pick.file,
-    source: "bundled SN core rules (the sn-api-packs server was unreachable — the full <local path> corpus was not loaded; start the main app to serve /sn-api-packs)",
+    source: "bundled SN core rules (the sn-api-packs server was unreachable — the full C:\\redacted\\path)",
     text: SN_PACK };
 }
 
 // Advertised to every SN run's drafter (appended to the pack) AND injected into
-// the tool-less gates — so all phases know the <local path> standard even though only
+// the tool-less gates — so all phases know the C:\redacted\path
 // tool-capable phases can call the tool.
 export const SN_REF_TOOL_NOTE = `
-AUTHORITATIVE API REFERENCE ON DEMAND (single source of truth): the official ServiceNow API Reference (<local path>) is authoritative for how any API method, table field, or event actually behaves. Whenever you are unsure of a method signature, whether a method exists, valid event names, or a table/field — CALL the sn_api_reference tool ({"query":"<API method/class/table/event or artifact type>"}) and follow what it returns over your memory; its text OVERRIDES any conflicting recollection or code sample. To LIST the methods of a class, query the class name (e.g. {"query":"GlideAggregate methods"}) — the pack contains the COMPLETE documented method roster for the core Glide classes (GlideRecord, GlideAggregate, GlideElement, GlideDateTime, GlideSystem, GlideForm/g_form). Use {"query":"index"} to see what references exist.
-GROUND IN WHAT THE TOOL RETURNS — DO NOT GREP THE RAW PDF: answer from the pack sn_api_reference gives you. If a specific method or detail is NOT in the returned reference, say so plainly ("not in the documented reference — validate against the live instance") — do NOT invent it, and do NOT try to open, read, or search the raw reference PDF yourself (do NOT run_command a python/PyMuPDF script, and do NOT read_file the multi-hundred-MB PDF — read_file is scoped to the connected folder and a raw-PDF grep will dead-end). The sn_api_reference tool IS your access path to <local path> the extracted packs it serves are the consumable form of that PDF. It documents client/server/REST methods, parameters and events; runtime config/table behaviors it does not cover remain live-instance validation items.
+AUTHORITATIVE API REFERENCE ON DEMAND (single source of truth): the official ServiceNow API Reference (C:\\redacted\\path) is authoritative for how any API method, table field, or event actually behaves. Whenever you are unsure of a method signature, whether a method exists, valid event names, or a table/field — CALL the sn_api_reference tool ({"query":"<API method/class/table/event or artifact type>"}) and follow what it returns over your memory; its text OVERRIDES any conflicting recollection or code sample. To LIST the methods of a class, query the class name (e.g. {"query":"GlideAggregate methods"}) — the pack contains the COMPLETE documented method roster for the core Glide classes (GlideRecord, GlideAggregate, GlideElement, GlideDateTime, GlideSystem, GlideForm/g_form). Use {"query":"index"} to see what references exist.
+GROUND IN WHAT THE TOOL RETURNS — DO NOT GREP THE RAW PDF: answer from the pack sn_api_reference gives you. If a specific method or detail is NOT in the returned reference, say so plainly ("not in the documented reference — validate against the live instance") — do NOT invent it, and do NOT try to open, read, or search the raw reference PDF yourself (do NOT run_command a python/PyMuPDF script, and do NOT read_file the multi-hundred-MB PDF — read_file is scoped to the connected folder and a raw-PDF grep will dead-end). The sn_api_reference tool IS your access path to C:\\redacted\\path
 CITE THE REFERENCE (so the gates can verify it): the sn_api_reference result is recorded in the evidence ledger — its returned text is chunked into citation tokens (_cite / [E<n>.text], [E<n>.text.1], …). When you state what the reference documents (e.g. a class's method list), attach the token for the chunk that contains it, exactly as you cite any other evidence — using the EXACT token strings the tool result gives you in its _cite list; never invent an [E<n>.O<k>] or chunk number that the result did not return (a made-up token fails the deterministic gate and forces a repair). An answer that lists methods FROM the reference WITHOUT citing its ledger tokens will read to the reviewer as unsupported/fabricated — cite the chunk and the roster is verified authoritative.`;
 
 // ---------------------------------------------------------------------------
@@ -652,7 +652,7 @@ export async function buildServiceNowPack(settings, taskText) {
       " — authoritative for signatures and table names; prefer this over memory) ---\n" + apiPack;
   }
   text += "\n" + SN_NAV;
-  // Every SN run (any phase) carries the <local path> authority + the on-demand
+  // Every SN run (any phase) carries the C:\redacted\path
   // lookup tool note, so all models operate under ONE source of truth.
   text += "\n" + SN_REF_TOOL_NOTE;
   // AUTO-REFERENCE ROUTING (2026-07-20, live SS1 a-live-run): on a BUILD/implementation
@@ -666,7 +666,7 @@ export async function buildServiceNowPack(settings, taskText) {
     // MANDATORY STRUCTURED PLAN first (user directive 2026-07-21) — the SN build gets
     // the same Requirement→Findings→SN_REF→Design→Build→UAT plan as the sample.
     text += "\n" + STRUCTURED_PLAN_CONTRACT;
-    text += `\n\nREFERENCE FILLS THE PLAN (this is a BUILD task): as PART OF PLANNING (before you write the plan out), call sn_api_reference to load the authoritative <local path> reference as CITABLE evidence for the plan's REFERENCE VERIFICATION section — this is not permission to start building. YOU pick the right reference: call {"query":"index"} to see every available reference, then read the one(s) that match the artifact you're building (e.g. flow-designer for a Flow, business-rules for a Business Rule, sp-widget for a widget) — do NOT rely only on any auto-injected pack, which may not match your artifact.` +
+    text += `\n\nREFERENCE FILLS THE PLAN (this is a BUILD task): as PART OF PLANNING (before you write the plan out), call sn_api_reference to load the authoritative C:\\redacted\\path's REFERENCE VERIFICATION section — this is not permission to start building. YOU pick the right reference: call {"query":"index"} to see every available reference, then read the one(s) that match the artifact you're building (e.g. flow-designer for a Flow, business-rules for a Business Rule, sp-widget for a widget) — do NOT rely only on any auto-injected pack, which may not match your artifact.` +
       (artifactLabel ? ` For this task, the artifact reference is likely ${file} — start with {"query":"${artifactLabel}"}.` : ` Query the artifact type you are building.`) +
       (recordsLikely ? ` Also call {"query":"GlideRecord methods"} if you will create/query records.` : ``) +
       ` Cite the returned [E#.text…] tokens in the plan (an uncited API claim will be rejected by the reviewer). ONLY AFTER you have posted the FULL structured plan + UAT (per the ⛔ PLAN-BEFORE-BUILD gate above) do you build: set the script with set_editor_value, persist with save_record, and re-read to confirm. Building BEFORE the plan is posted is a failure; and a plan WITHOUT the persisted build (set_editor_value + save_record) is an INCOMPLETE build.`;

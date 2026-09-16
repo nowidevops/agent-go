@@ -32,7 +32,7 @@ t("same instance host → no correction",
   shouldCorrect("dev000000.service-now.com", "dev000000.service-now.com") === false);
 
 // ---------------------------------------------------------------------------
-// sn_api_reference — <local path> on-demand lookup (2026-07-20). resolvePackFile is
+// sn_api_reference — C:\redacted\path). resolvePackFile is
 // PURE (no network); lookupSnApiReference with no phaseFilesUrl exercises the
 // server-down paths (index from the built-in map; fallback to bundled rules).
 // ---------------------------------------------------------------------------
@@ -100,7 +100,7 @@ t("a Business Rule task is NOT flow", detectSnArtifactType("write a business rul
 { const reviewPack = await buildServiceNowPack({}, "review this business rule for bugs");
   t("review task pack does NOT carry the build reference-first mandate", !/REFERENCE-FIRST \(this is a BUILD task\)/.test(reviewPack)); }
 
-// wrapSnClassicTarget (2026-08-02, live INC1926570 run on customer-dev: bare
+// wrapSnClassicTarget (2026-08-02, live INC0012345 run on customer-dev: bare
 // sys_assignment_rule_list.do → SN "Page not found", 6 calls burned before the
 // list ever opened). navigate uses this to self-heal a classic 404 in one call.
 console.log("— wrapSnClassicTarget (polaris wrapper for bare classic .do) —");

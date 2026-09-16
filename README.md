@@ -1,18 +1,26 @@
 # Agent Go
 
-A browser agent for ServiceNow and everyday web work. It reads the page you are on, calls
-tools, and gets the task done: forms, catalog items, classic workflows, research, documents.
+The agent that does the work for you, on any website. Give it a task in the side panel and it
+reads the page you are on, clicks, types, navigates, searches and reads sources, drafts the
+email or chat message, fills the form, and reports what it did. It is not limited to
+ServiceNow: it handles everyday web work anywhere you are signed in (mail, chat, research,
+documents, admin consoles). ServiceNow is where it goes deepest, with tools and knowledge
+packs for the platform's own tables, scripts and classic workflows.
+
 Inference runs on the Agentic Copilot service, so there is nothing to install except this
 extension. No local model, no API key.
 
 Download the ready-to-load pack and the full install guide at
 https://ai.nowidevops.com/agent-go.html. This repository is the source of that pack.
 
-Version 0.2.6. Works in Chrome, Edge and Brave (desktop), loaded as an unpacked extension.
+Version 0.2.22. Works in Chrome, Edge and Brave (desktop), loaded as an unpacked extension.
 
 ## What it does
 
-- Reads the page and acts on it: click, fill, select, navigate, screenshot and describe.
+- Any site: reads the page and acts on it (click, fill, select, navigate, screenshot and
+  describe), opens and reads sources for research, composes mail and chat messages for your
+  approval, works through multi-step forms, and can split a task across sub-agents in their
+  own tabs.
 - ServiceNow, through your own signed-in browser session, so no instance password is needed
   for the normal flow (an optional Basic-auth connection you add yourself is stored in the
   browser's local extension storage): record lookups, schema, scripts, classic-workflow
@@ -38,11 +46,19 @@ Version 0.2.6. Works in Chrome, Edge and Brave (desktop), loaded as an unpacked 
 `INSTALL.md` has the step-by-step guide that ships with the download, including the sign-in
 steps and the troubleshooting list.
 
+## Use cases
+
+`USE_CASES.md` holds worked examples with the exact prompt to paste: a classic ServiceNow
+workflow built and published from one request (the launch video), and a knowledge-worker task
+outside ServiceNow (research in the open, a cited brief, an email draft left for approval).
+
 ## Account, cost, privacy
 
 The extension talks to the Agentic Copilot service; a signed-in account with credits is
 required. Reading pages and ServiceNow lookups do not cost credits; each model answer (one
-agent turn) does, at the rates on the download page. Page content and screenshots you send go
+agent turn) does, at the rates on the download page. The Prompt Builder is free (capped at 20
+prompts an hour, priced by the service, not the extension); an image attached to it is described
+first at the included-model rate. Page content and screenshots you send go
 to the service and the model that answers, so do not send confidential data. The extension
 works through your signed-in ServiceNow session; if you add a stored connection with a
 username and password, it lives in the browser's local extension storage on your machine and

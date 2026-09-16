@@ -9,4 +9,8 @@
 
 Run the suites before opening a pull request:
 
-    for f in *.test.mjs test/*.mjs; do node "$f" || exit 1; done
+    npm install            # optional: only collapsible.test.mjs needs jsdom
+    npm test
+
+A suite that exits 77 is SKIPPED because an optional dev dependency is missing; that is not a
+failure. Any other non-zero exit is.
