@@ -4,7 +4,9 @@ The agent that does the work for you, on any website. Give it a task in the side
 reads the page you are on, clicks, types, navigates, searches and reads sources, drafts the
 email or chat message, fills the form, and reports what it did. It is not limited to
 ServiceNow: it handles everyday web work anywhere you are signed in (mail, chat, research,
-documents, admin consoles). ServiceNow is where it goes deepest, with tools and knowledge
+documents, admin consoles). Method packs teach it one kind of work at a time - research,
+inbox and chat replies, meeting follow-ups, knowledge articles, contract review, RFP answers -
+and load only when the task calls for one. ServiceNow is where the tooling goes deepest, with
 packs for the platform's own tables, scripts and classic workflows.
 
 Inference runs on the Agentic Copilot service, so there is nothing to install except this
@@ -26,8 +28,19 @@ Version 0.2.22. Works in Chrome, Edge and Brave (desktop), loaded as an unpacked
   browser's local extension storage): record lookups, schema, scripts, classic-workflow
   activities, Fix Scripts, a publish that reads itself back and flushes the workflow cache,
   and a ledger of every record it created.
-- Knowledge packs for ServiceNow work (workflow, code review, RCA, incident resolution,
-  post-deployment checks) that load only when the task calls for them.
+- Method packs for knowledge work, each one a way of working the agent picks up only when the
+  task calls for it: deep research (decompose the question, gather in parallel, verify, cite
+  every claim), inbox triage and reply drafts in Gmail or Outlook, Slack and Teams reply drafts
+  (read-only, nothing is sent), meeting follow-ups (decisions, action items, minutes), knowledge
+  articles, SOPs and runbooks, contract and NDA review against your playbook, RFP, RFI and
+  security-questionnaire answers, root-cause analysis, and a closing pass that strips the AI
+  tells out of the prose it hands you.
+- Method packs for ServiceNow work: the platform core, classic Workflow, Workflow Studio, code
+  review, incident resolution, RCA and post-deployment checks.
+- Packs are plain files in this repository, so you can read what one teaches before you trust
+  it, edit it, or write your own. The knowledge-work packs ship bundled in full. Seven packs
+  (the ServiceNow core, the behaviour packs and the market ones) also pull a newer copy from
+  the service at run time and fall back to the bundled text when it is unreachable.
 - Guardrails in code, not only in the prompt: read-only modes, approval gates on anything that
   sends or deletes, loop and cycle breakers, a test-record guard, and honest 401/403 messages.
 - Scheduled shortcuts, per-account, with a market-day calendar for timed runs.
