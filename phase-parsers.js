@@ -1,7 +1,7 @@
 // phase-parsers.js — pure, node-testable gate parsers + deterministic invariants
 // for the phase engine (IMPROVEMENTS_PHASE_ENGINE.md §3.5/§3.6).
 // Ported from the AgenticWorkflow engine's gate semantics (run-core.js) per
-// master-mind session 6a581885ae245ea624bdb64a, with the consensus amendments:
+// an internal review, with the consensus amendments:
 // fail-closed everywhere, anchored-NO-GO precedence, thought-block stripping,
 // BEGIN/END_DELIVERABLE delimiters, and the structured evidence contract
 // (citation tokens + exact value-match + coverage + freshness).
@@ -520,7 +520,7 @@ export const SNAPSHOT_EVIDENCE_TOOLS = new Set(["capture_screenshot", "desktop_s
 // RESEARCH-flavored, and the gates switch to source-citation semantics (a claim
 // citing a credible on-topic source is supported; exact-value match is NOT
 // required for a fact synthesized from a long web page). 2026-07-19w.
-// MM review 6a5d90ea (2026-07-19y) P1 fix: `http_request` REMOVED — it is a
+// an internal review (2026-07-19y) P1 fix: `http_request` REMOVED — it is a
 // generic tool that can target ServiceNow REST / localhost, so a non-research
 // (even failed) http_request was falsely activating the research relaxation.
 // It stays in EVIDENCE_TOOLS (still ledgerable) but is no longer a research
@@ -530,7 +530,7 @@ export const WEB_EVIDENCE_TOOLS = new Set(["web_search", "google_search", "fetch
 // ServiceNow-record evidence tools — a run whose ledger contains any of these
 // (or a DOM read on a ServiceNow instance) carries instance-record claims that
 // MUST keep exact-value strictness. Used to KILL the research relaxation in a
-// MIXED SN+web run (MM review 6a5d90ea P1: the relaxation was run-global and
+// MIXED SN+web run (an internal review P1: the relaxation was run-global and
 // softened the reviewer's bar on SN prose whenever any web tool also fired).
 export const SN_EVIDENCE_TOOLS = new Set(["sn_fetch_script_by_sysid", "sn_query_table", "sn_query_record", "sn_query_session", "sn_wf_activity_vars"]);
 

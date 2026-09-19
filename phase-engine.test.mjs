@@ -225,8 +225,10 @@ console.log("— $SELECTED: header model orchestrates, any provider —");
   // 2 live runs). Great drafter (header), broken gate reviewer. Chains are back
   // to pure Ollama-cloud for the gates.
   // AGENT GO ROSTER (2026-07-18 cloud re-map): deepseek reviews, qwen3.5 reverifies, glm tails.
-  t("review chain (deepseek → qwen3.5 → glm) — Agent Go roster", chains.review[0].model === "deepseek-v4-pro:cloud" && chains.review[0].provider === "ollama" && chains.review[1].model === "qwen3.5:397b:cloud" && chains.review[2].model === "glm-5.2:cloud" && chains.review.length === 3);
-  t("reverify chain (qwen3.5 → kimi → glm) — Agent Go roster", chains.reverify[0].model === "qwen3.5:397b:cloud" && chains.reverify[0].provider === "ollama" && chains.reverify[1].model === "kimi-k2.7-code:cloud" && chains.reverify.length === 3);
+  t("review chain (deepseek → glm) — Agent Go roster", chains.review[0].model === "deepseek-v4-pro:cloud" && chains.review[0].provider === "ollama" && chains.review[1].model === "glm-5.2:cloud" && chains.review.length === 2);
+  t("reverify chain (minimax → kimi → glm) — Agent Go roster", chains.reverify[0].model === "minimax-m3:cloud" && chains.reverify[0].provider === "ollama" && chains.reverify[1].model === "kimi-k2.7-code:cloud" && chains.reverify.length === 3);
+  // RETIRED 2026-09-25 (Ollama Cloud): qwen3.5:397b, deepseek-v4-flash, glm-5.1.
+  t("no retired model tags in any chain", !JSON.stringify(chains).match(/qwen3\.5:397b|deepseek-v4-flash|glm-5\.1[^0-9]/));
   t("NO custom/qwen in ANY default chain", ["review", "reverify", "orchestrator", "repair"].every((r) => chains[r].every((c) => c.provider !== "custom" && c.model !== "qwen/qwen3-coder")));
   t("every terminal tail is ollama", ["review", "reverify", "orchestrator", "repair"].every((r) => chains[r].at(-1).provider === "ollama"));
   t("orchestrator head glm / repair head kimi-code — Agent Go roster", chains.orchestrator[0].model === "glm-5.2:cloud" && chains.repair[0].model === "kimi-k2.7-code:cloud" && chains.repair[1].model === "glm-5.2:cloud");

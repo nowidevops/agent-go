@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.2.25 — 2026-09-19
+
+- Settings page fix. A packaging step had dropped a closing `</code>` tag from `options.html`, so the
+  browser treated the rest of the page as one code block: monospace headings, a six-column limits
+  row, and the Shortcuts and Saved workflows sections showing under every page. Both the download
+  pack and this repository carried the broken page; here the tag came back in the commit just
+  before this release, and the packaging step now stops at `<`.
+- Settings field labels are semi-bold 13px in the accent colour, so a field is easier to find.
+  Switch rows keep their neutral text.
+- Model lists: `deepseek-v4-flash:cloud` is out of the picker and `qwen3.5:397b:cloud` is out of the
+  default review and reverify chains, because Ollama Cloud retires both on 2026-09-25.
+  `minimax-m3:cloud` heads the reverify chain. This change is in the source ahead of the 0.2.25
+  download pack; the pack picks it up in its next build.
+
+## 0.2.23 and 0.2.24 — 2026-09-18
+
+- Paper-trading pack: the agent's instructions now describe the service's three entry brakes
+  (a cap on how far a stock has already moved that day, a limit on exposure after a losing streak,
+  and limit orders that are cancelled if still wholly unfilled after about five minutes).
+- When the submit switch refuses an order, the message says which setting refused it.
+
+## 0.2.12 to 0.2.22 — 2026-09-05 to 2026-09-15
+
+- Redesigned side panel and Settings (paged Settings with a left menu and search, light and dark
+  themes, first-run screen), saved workflows recorded with Teach, scheduled shortcuts, and the
+  Listen voice input. The public source skipped these versions: it went from 0.2.6 to 0.2.22.
+
 ## 0.2.11 — 2026-09-05
 
 - Screenshots are described by `glm-5.3-flash` by default (was `gemma4:31b`, which misread exact

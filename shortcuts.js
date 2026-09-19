@@ -22,8 +22,8 @@ export const BUILTINS = [
 // seedShortcuts() (background.js, on install/startup); user edits/deletes are
 // respected — a deleted seed is NOT re-added unless the version is bumped.
 // Deterministic ids (seed-*) so a re-run can never duplicate an entry.
-// v2 (2026-07-19): +17 category stories from "C:\redacted\path
-// conversations\ServiceNow AI Prompt Guide.txt" + UI Builder / Decision Table /
+// v2 (2026-07-19): +17 category stories from a ServiceNow
+// prompt guide + UI Builder / Decision Table /
 // Playbook / Legacy Workflow / Flow Custom Action use cases (user request).
 export const SHORTCUT_SEED_VERSION = 2;
 export const SEED_SHORTCUTS = [

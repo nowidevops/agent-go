@@ -86,8 +86,8 @@ let isAdmin = false;
 })();
 
 // Hide admin/training-only UI from non-admins (fail-closed: hidden until /me
-// confirms admin). Conversation log auto-saves full transcripts for LLM training —
-// an internal feature, not for usage-tier users.
+// confirms admin). The Conversation log writes transcripts to a LOCAL folder the
+// admin picks; nothing is uploaded. It is an admin tool and stays hidden for everyone else.
 function applyAdminGating() {
   const convLog = document.getElementById("menuConvLog");
   if (convLog) convLog.hidden = !isAdmin; // hidden until /me confirms admin; shown for admins

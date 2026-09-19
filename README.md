@@ -15,7 +15,7 @@ extension. No local model, no API key.
 Download the ready-to-load pack and the full install guide at
 https://ai.nowidevops.com/agent-go.html. This repository is the source of that pack.
 
-Version 0.2.22. Works in Chrome, Edge and Brave (desktop), loaded as an unpacked extension.
+Version 0.2.25. Works in Chrome, Edge and Brave (desktop), loaded as an unpacked extension.
 
 ## What it does
 

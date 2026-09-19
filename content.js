@@ -356,15 +356,31 @@ function queryElements(selector, text, limit = 20) {
 // ON: an UNSET kill-switch counts as allowed; only an explicit false blocks. The
 // server brakes (paper-only, sizing, lockout) are untouched. Used by EVERY DOM path that could submit an
 // order (button click, fill+submit, Enter) — not just the Submit button.
+// 2026-09-18: records WHICH check refused, so the block message names the real cause. Before
+// this, a storage read that threw (a page whose content script outlived an extension reload)
+// produced the same "unticked in Options" text as a real toggle, and a live cycle
+// could not tell a settings problem from a stale page.
+let dayTradingSubmitDenyCause = "";
 async function dayTradingSubmitAllowed() {
+  dayTradingSubmitDenyCause = "";
   try {
     const { paperOrderSubmissionEnabled } = await chrome.storage.local.get("paperOrderSubmissionEnabled");
-    if (paperOrderSubmissionEnabled === false) return false;
+    if (paperOrderSubmissionEnabled === false) { dayTradingSubmitDenyCause = "submit-toggle"; return false; }
     const { settings } = await chrome.storage.sync.get("settings");
-    return !(settings && settings.tradingPackEnabled === false);
-  } catch { return false; }
+    if (settings && settings.tradingPackEnabled === false) { dayTradingSubmitDenyCause = "pack-toggle"; return false; }
+    return true;
+  } catch (e) { dayTradingSubmitDenyCause = "storage-error: " + ((e && e.message) || String(e)); return false; }
 }
-const SUBMIT_BLOCKED = { ok: false, blocked: true, reason: "Autonomous order submission is OFF — the day-trading agent pack or the 'AUTONOMOUS submit (PAPER)' toggle was unticked in Options (both are on by default). The agent cannot place an order; a human must click Submit Order. (Validate / dry-run is still allowed.)" };
+const SUBMIT_BLOCKED_TAIL = " The agent cannot place an order; a human must click Submit Order. (Validate / dry-run is still allowed.)";
+function submitBlocked() {
+  const c = dayTradingSubmitDenyCause;
+  let reason;
+  if (c === "submit-toggle") reason = "Autonomous order submission is OFF — the 'AUTONOMOUS submit (PAPER)' toggle is unticked in Options (on by default). Tick it in Options — the gate re-reads it live, no reload needed.";
+  else if (c === "pack-toggle") reason = "Autonomous order submission is OFF — the 'Day-trading agent pack' toggle is unticked in Options (on by default), so unless you unticked it mid-run the trading pack was not injected into this run either. Tick it in Options and reload the page (Ctrl+F5) so the pack loads.";
+  else if (c.indexOf("storage-error") === 0) reason = "Reload the Day Trading page (Ctrl+F5) and retry: autonomous order submission could not be verified because the extension's settings are unreadable from this page (" + c.slice(15) + "), usually because the extension was reloaded or updated while the page stayed open. This is usually not a settings problem.";
+  else reason = "Autonomous order submission is OFF — the day-trading agent pack or the 'AUTONOMOUS submit (PAPER)' toggle was unticked in Options (both are on by default).";
+  return { ok: false, blocked: true, cause: c || "unknown", reason: reason + SUBMIT_BLOCKED_TAIL };
+}
 function isOrderField(el) { try { return !!(el && el.id && /^order/i.test(el.id)); } catch { return false; } }
 
 // ── REAL-MONEY (live-trading.html) submission guard (2026-09-11) ──────────────────────
@@ -447,15 +463,15 @@ function armLockoutWatcher() {
   // feedback containers — NOT document.body, which contains the static dry-run hint
   // "...checks paper-mode, R:R, sizing, lockout & market hours..." that would
   // otherwise phantom-latch a lockout on the first submit.
-  // 2026-09-10b (master-mind 6aa2e1b6 M3): "ORDER BLOCKED" REMOVED from the latch. POST /orders
+  // 2026-09-10b (an internal review M3): "ORDER BLOCKED" REMOVED from the latch. POST /orders
   // prefixes EVERY validator rejection with 'ORDER BLOCKED — ' (RR_TOO_LOW, VWAP_EXTENSION,
   // RISK_TOO_HIGH ...), so one per-order geometry reject was latching a 6-hour client lockout
   // and silently ending the buyer's day. Only the daily-loss / lockout wording latches now.
-  // 2026-09-10c (master-mind 6aa2ea93 MF-1): the server's REAL day-ending codes are DAILY_TIER_BLOCK /
+  // 2026-09-10c (an internal review MF-1): the server's REAL day-ending codes are DAILY_TIER_BLOCK /
   // DAILY_TIER_FLATTEN / DAILY_TIER_SESSION_GOAL / DAILY_TIER_LOSS_COUNT, RISK_HALT and BOT_HALTED
   // (order-validator.js); DAILY_LOSS_LOCKOUT is never emitted. Latch on those, never on the
   // generic 'ORDER BLOCKED' prefix every per-order rejection carries.
-  const re = /DAILY_TIER_\w+|RISK_HALT|BOT_HALTED|NON_PAPER|DAILY_LOSS_LOCKOUT|Daily loss limit reached|No new orders until tomorrow|max daily loss/i; // master-mind 6aa46229 F6: prefix-match the tier codes, NON_PAPER is day-ending
+  const re = /DAILY_TIER_\w+|RISK_HALT|BOT_HALTED|NON_PAPER|DAILY_LOSS_LOCKOUT|Daily loss limit reached|No new orders until tomorrow|max daily loss/i; // an internal review F6: prefix-match the tier codes, NON_PAPER is day-ending
   const iv = setInterval(() => {
     tries++;
     try {
@@ -475,14 +491,14 @@ function armLockoutWatcher() {
         return;
       }
     } catch {}
-    if (tries >= 24) clearInterval(iv); // ~12s @ 500ms — a slow /orders round-trip (validator reads quote+bars+positions) can exceed 4 s (master-mind 6aa2f178 P3-4)
+    if (tries >= 24) clearInterval(iv); // ~12s @ 500ms — a slow /orders round-trip (validator reads quote+bars+positions) can exceed 4 s (an internal review P3-4)
   }, 500);
 }
 
 // Full submit guard: flags → local lockout → anti-spam latch. Returns null when
 // the submit may proceed (and records the latch + arms the watcher), else a block.
 async function guardDayTradingSubmit() {
-  if (!(await dayTradingSubmitAllowed())) return SUBMIT_BLOCKED;
+  if (!(await dayTradingSubmitAllowed())) return submitBlocked();
   const now = Date.now();
   try {
     const { dayTradingSubmitBlockedUntil } = await chrome.storage.local.get("dayTradingSubmitBlockedUntil");
@@ -551,9 +567,9 @@ async function clickElement(handle, double) {
     }
     if (/live-trading/i.test(location.href) && el.id === "btnScanExec") { // MM pass 3 L9: Sched buttons are refused outright by S2
       if (!(await liveTradingSubmitAllowed())) return { ok: false, blocked: true, reason: "REAL-MONEY autonomous execution is OFF — \"" + (txt || el.id) + "\" places live orders outside the manual form. Enable BOTH the live-trading agent pack AND 'AUTONOMOUS submit (LIVE — REAL MONEY)' to allow it." };
-      const g = await guardLiveTradingSubmit(); if (g) return g; // MM 6aa484e7 P5: the lockout latch binds here too
+      const g = await guardLiveTradingSubmit(); if (g) return g; // an internal review P5: the lockout latch binds here too
     }
-    if (/live-trading/i.test(location.href) && double) double = false; // MM 6aa484e7 P5: one real-money click per tool call
+    if (/live-trading/i.test(location.href) && double) double = false; // an internal review P5: one real-money click per tool call
   } catch (e) {
     lcWarn("clickElement submit-guard", e);
     if (/day-trading|live-trading/i.test(location.href)) { // MM pass 3 L2: never fall through to a click on a trading page
@@ -574,7 +590,12 @@ async function clickElement(handle, double) {
     // "Start" (#btnSchedStart, startScheduler()) — under the SAME kill-switch, since
     // they place orders outside the manual form. (Human clicks bypass content.js.)
     if (/day-trading/i.test(location.href) && (el.id === "btnScanExec" || el.id === "btnSchedStart") && !(await dayTradingSubmitAllowed())) {
-      return { ok: false, blocked: true, reason: "Autonomous execution is OFF — \"" + (txt2 || el.id) + "\" places orders outside the manual form. Enable BOTH the day-trading agent pack AND 'AUTONOMOUS submit (PAPER)' to allow it." };
+      const sb = submitBlocked();
+      const why = sb.cause === "pack-toggle" ? "the 'Day-trading agent pack' toggle is unticked — tick it in Options and reload (Ctrl+F5)"
+        : sb.cause === "submit-toggle" ? "the 'AUTONOMOUS submit (PAPER)' toggle is unticked — tick it in Options and retry"
+        : sb.cause.indexOf("storage-error") === 0 ? "settings are unreadable from this page — reload (Ctrl+F5) and retry"
+        : "a required toggle is off";
+      return { ok: false, blocked: true, cause: sb.cause, reason: "Autonomous execution is OFF — \"" + (txt2 || el.id) + "\" places orders outside the manual form. Enable BOTH the day-trading agent pack AND 'AUTONOMOUS submit (PAPER)' to allow it: " + why + "." };
     }
   } catch (e) {
     lcWarn("clickElement submit-guard", e);
@@ -704,7 +725,7 @@ async function pressKey(key) {
       return { ok: false, blocked: true, reason: "REAL-MONEY bot controls are OFF-LIMITS to the agent (keyboard)." };
     }
   }
-  if (/^(Enter|NumpadEnter| |Space)$/.test(keyName) && /live-trading/i.test(location.href) && (!target || target === document.body || isOrderField(target) || /submit\s*order/i.test((target.innerText || target.value || (target.getAttribute && target.getAttribute("aria-label")) || "")) || target.id === "btnScanExec" || target.id === "btnSchedStart")) { // MM 6aa484e7 P6
+  if (/^(Enter|NumpadEnter| |Space)$/.test(keyName) && /live-trading/i.test(location.href) && (!target || target === document.body || isOrderField(target) || /submit\s*order/i.test((target.innerText || target.value || (target.getAttribute && target.getAttribute("aria-label")) || "")) || target.id === "btnScanExec" || target.id === "btnSchedStart")) { // an internal review P6
     const g = await guardLiveTradingSubmit();
     if (g) return g;
   }

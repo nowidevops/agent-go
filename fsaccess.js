@@ -207,7 +207,7 @@ const MAX_RESPONSE_CHARS = 200000;          // 200K chars/response
 const MAX_DIR_ENTRIES = 2000;
 const MAX_RECURSIVE_DEPTH = 8;
 
-// Models often pass an ABSOLUTE path (e.g. "C:\\redacted\\path") even though
+// Models often pass an ABSOLUTE path (e.g. "C:\\redacted\\path\\<root>\\sub") even though
 // the API is root-relative. If the connected root's folder name appears as a
 // segment, take everything AFTER it (the relative path). A drive-letter path that
 // doesn't contain the root name is genuinely outside the sandbox → error.

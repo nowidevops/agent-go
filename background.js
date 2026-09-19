@@ -56,7 +56,7 @@ initNetLog();
 // Build marker — bump on each change so you can confirm in the service-worker
 // console (chrome://extensions → "service worker") that a reload actually picked
 // up the new code. If you don't see this line after reloading, the worker is stale.
-const BUILD_TAG = "AGENT GO 0.2.22 — open-source release";
+const BUILD_TAG = "AGENT GO 0.2.25 — open-source release";
 console.log("[Local LLM] background.js loaded — build " + BUILD_TAG);
 
 // Race a promise against the run's AbortSignal so a hung awaited operation can be
@@ -139,7 +139,7 @@ flagInterruptedPhaseRun().catch(() => {});
 // Same eviction gap for the seeded slash commands: version-gated no-op after
 // the first successful run, so this is one cheap storage read per cold start.
 seedShortcuts().catch(() => {});
-// Demo workflows too, so a zip reloaded with only the side panel open gets them (Master-Mind 6aa7700c B7). No-op when present.
+// Demo workflows too, so a zip reloaded with only the side panel open gets them (an internal review B7). No-op when present.
 seedDemoWorkflows().catch(() => {});
 // Declared here (not next to withRunKeepalive) so the cold-start sweep below is
 // not reading a `const` that is still in its temporal dead zone.
@@ -485,7 +485,7 @@ const ACTION_TOOLS = new Set(["create_shortcut", "click_element", "fill_input", 
 // verbatim, to Alex) with no review — the user now wants every outgoing chat
 // message shown for approval first. draft_chat_message stays un-gated (never sends).
 const ALWAYS_CONFIRM_TOOLS = new Set(["send_chat_message", "delete_chat_message", "send_sms", "send_email", "write_file", "create_document", "delete_file", "edit_file", "run_command",
-  ...DESKTOP_ACTION_TOOL_NAMES, // MM 6aa484e7 P2: an OS-level click/type always gets a look first
+  ...DESKTOP_ACTION_TOOL_NAMES, // an internal review P2: an OS-level click/type always gets a look first
   // sn_wf_delete_activity (2026-09-02) removes workflow records on the instance — deletion always gets a look first.
   "sn_wf_delete_activity"]);
 
@@ -1011,7 +1011,7 @@ async function runAgent(history, post, signal, attachments, askApproval, modelOv
     const _multi = _roots.length > 1;
     const _names = _roots.map((r) => `"${r.name}"`).join(", ");
     const _openLine = _multi
-      ? `\n\nCONNECTED LOCAL FOLDERS (Filesystem MCP — ground truth): ${_roots.length} local folders are connected — ${_roots.map((r) => `"${r.name}" (read${r.canWrite ? "/write" : "-only"})`).join(", ")}. The \`list_files\`/\`read_file\` (and organize/write) tools work across ALL of them, but a path must say WHICH folder: PREFIX it with the folder NAME — e.g. read_file "${_roots[0].name}/README.md", list_files "${_roots[0].name}", search_files with path "${_roots[0].name}". A bare path with NO folder prefix is AMBIGUOUS and will error — always include the prefix. \`list_files\` with NO path lists the connected folder names. A Windows path in the task (e.g. C:\\redacted\\path) maps to the connected folder whose NAME is its last segment: write to "<FolderName>/file.md". `
+      ? `\n\nCONNECTED LOCAL FOLDERS (Filesystem MCP — ground truth): ${_roots.length} local folders are connected — ${_roots.map((r) => `"${r.name}" (read${r.canWrite ? "/write" : "-only"})`).join(", ")}. The \`list_files\`/\`read_file\` (and organize/write) tools work across ALL of them, but a path must say WHICH folder: PREFIX it with the folder NAME — e.g. read_file "${_roots[0].name}/README.md", list_files "${_roots[0].name}", search_files with path "${_roots[0].name}". A bare path with NO folder prefix is AMBIGUOUS and will error — always include the prefix. \`list_files\` with NO path lists the connected folder names. A Windows path in the task (e.g. C:\\redacted\\path\\<FolderName>\\file.md) maps to the connected folder whose NAME is its last segment: write to "<FolderName>/file.md". `
       : `\n\nCONNECTED LOCAL FOLDER (Filesystem MCP — ground truth): a local folder named "${_roots[0].name}" is mounted read${_roots[0].canWrite ? "/write" : "-only"} and you can read it with the \`list_files\` and \`read_file\` tools (paths are RELATIVE to this root). `;
     systemPrompt += _lapsedLine + _openLine +
       `read_file handles MORE than text/code: PDFs, Word (.docx), Excel (.xlsx), PowerPoint (.pptx) and RTF files have their TEXT extracted, and images (.png/.jpg/...) are DESCRIBED via the vision model — so to summarize or answer about such a file, just read_file it. NEVER claim binary files in this folder are unreadable. ` +
@@ -1688,7 +1688,7 @@ async function runAgent(history, post, signal, attachments, askApproval, modelOv
     })()
   };
 
-  // Phase engine (IMPROVEMENTS_PHASE_ENGINE.md; MM 6a581885): CODE-enforced
+  // Phase engine (IMPROVEMENTS_PHASE_ENGINE.md; an internal review): CODE-enforced
   // gates around the loop. The loop runs as EXECUTE in embedded mode and the
   // engine owns the final emission — an unreviewed draft never posts as final
   // (T2). Toggle off → the exact pre-existing path below (T1).
@@ -1760,7 +1760,7 @@ async function agentLoop(ctx) {
   if (!settings.commandExecEnabled) {
     toolList = toolList.filter((t) => (t.function && t.function.name) !== "run_command");
   }
-  if (ctx.liveTradingPackInjected) { // REAL-MONEY run: no OS control, no shell (MM 6aa484e7 P2)
+  if (ctx.liveTradingPackInjected) { // REAL-MONEY run: no OS control, no shell (an internal review P2)
     toolList = toolList.filter((t) => !DESKTOP_ACTION_TOOL_NAMES.has(t.function && t.function.name) && (t.function && t.function.name) !== "run_command");
   }
   // 09k: ServiceNow tool schemas only when ServiceNow is in play (decided once per run; a
@@ -1796,7 +1796,7 @@ async function agentLoop(ctx) {
   const M1_MIN_NUM_CTX = 16384;
   // Trading-pack runs carry a comparably large prompt (pack + tool schema) and hit
   // the SAME silent context-overflow hang on local Ollama — the gate was previously
-  // m1ReadOnly-only, leaving 60-step trading cycles exposed (master-mind 6a491b6a).
+  // m1ReadOnly-only, leaving 60-step trading cycles exposed (an internal review).
   // Prefer the PRECISE injection flag (pack actually in the prompt). 09l checkpoints it, so
   // only a checkpoint written before 09l lacks it; that case falls back to the global-toggle
   // heuristic (fail-closed: the guard and the floor stay ON).
@@ -1838,7 +1838,7 @@ async function agentLoop(ctx) {
           executePlan: !!ctx.executePlan,
           prevAssistantText: String(ctx.prevAssistantText || "").slice(0, 6000),
           groundNudged: !!ctx.startGroundNudged,
-          // 09l (MM 6aa23373 D-1): the trading-pack injection flag survives a resume, so the
+          // 09l (an internal review D-1): the trading-pack injection flag survives a resume, so the
           // screenshot guard keeps its precise answer instead of the global-toggle fallback.
           // Absent in an older checkpoint stays absent (= unknown), never coerced to false.
           ...(typeof ctx.tradingPackInjected === "boolean" ? { tradingPackInjected: ctx.tradingPackInjected } : {}),
@@ -3109,7 +3109,7 @@ async function runChild({ parentCtx, args, post, signal, askApproval, childIndex
   // run — real-money safety must never depend on the parent's mode. (The executor
   // target-tab guard also covers this; this keeps the child's tool SCHEMA navless too.)
   let childM1ReadOnly = !!parentCtx.m1ReadOnly;
-  let childLiveReadOnly = false; // REAL-MONEY: a child bound to live-trading.html never writes (MM 6aa484e7 P4)
+  let childLiveReadOnly = false; // REAL-MONEY: a child bound to live-trading.html never writes (an internal review P4)
   if (!childM1ReadOnly) { // MM pass 3 L7: an UNBOUND child inherits the active tab's real-money pin too
     try { const bt = tabId != null ? await chrome.tabs.get(tabId) : (await chrome.tabs.query({ active: true, lastFocusedWindow: true }))[0]; if (bt && isM1DashboardUrl(bt.url)) childM1ReadOnly = true; if (bt && needsLiveTradingPack(bt.url)) childLiveReadOnly = true; } catch { /* tab gone — fall back to parent flag */ }
   }
@@ -3203,7 +3203,7 @@ async function resumeAgent(post, signal, askApproval, drainSteer) {
       runId: phaseSaved.envelope?.runId || ("resume-" + (phaseSaved.envelope?.savedAt || 0)),
       taskText: phaseSaved.envelope?.taskText || "",
       lessons: [], domainPack: domainPackText, fsInfo,
-      liveTradingPackInjected: await (async () => { try { const [a] = await chrome.tabs.query({ active: true, lastFocusedWindow: true }); return !!(a && needsLiveTradingPack(a.url)); } catch { return false; } })() // MM 6aa484e7 P1
+      liveTradingPackInjected: await (async () => { try { const [a] = await chrome.tabs.query({ active: true, lastFocusedWindow: true }); return !!(a && needsLiveTradingPack(a.url)); } catch { return false; } })() // an internal review P1
     };
     const res = await withRunKeepalive(() => resumePhased({ agentLoop, chatStream, withModelLock, activeProvider }, loopCtx, phaseSaved));
     if (res.resumed) return;
@@ -3228,7 +3228,7 @@ async function resumeAgent(post, signal, askApproval, drainSteer) {
   // M1 run would fall back to the full tool set and revert to prompt-only safety.
   let m1ReadOnly = !!state.m1ReadOnly;
   let readOnly = !!state.readOnly;
-  let liveResumed = state.liveTradingPackInjected === true; // REAL-MONEY pack flag survives MV3 eviction (MM 6aa484e7 P1)
+  let liveResumed = state.liveTradingPackInjected === true; // REAL-MONEY pack flag survives MV3 eviction (an internal review P1)
   try {
     const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
     if (active && isM1DashboardUrl(active.url)) m1ReadOnly = true;
@@ -3254,7 +3254,7 @@ async function resumeAgent(post, signal, askApproval, drainSteer) {
     prevAssistantText: state.prevAssistantText || "",
     startGroundNudged: !!state.groundNudged, // the one-shot grounded retry stays one-shot across a resume (N-13)
     ...(typeof state.tradingPackInjected === "boolean" ? { tradingPackInjected: state.tradingPackInjected } : {}), // 09l: restored, absent stays unknown
-    liveTradingPackInjected: liveResumed, // REAL-MONEY pack survives MV3 eviction (MM 6aa484e7 P1)
+    liveTradingPackInjected: liveResumed, // REAL-MONEY pack survives MV3 eviction (an internal review P1)
     m1ReadOnly,
     drainSteer, // steering works on resumed runs too
     fsInfo // re-probed connected-folder ground truth for post-resume sub-agents

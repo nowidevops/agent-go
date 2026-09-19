@@ -90,12 +90,12 @@ t("live pack posts a realMoney-tagged tool_result", /name: "live_trading_agent_p
 console.log("— content.js: separate guard, separate kill-switch, separate lockout keys —");
 t("liveTradingSubmitAllowed requires storage.local === true", /liveOrderSubmissionEnabled !== true\) return false;/.test(content));
 t("liveTradingSubmitAllowed requires pack === true AND prefill === true (three-toggle DOM contract, MM pass 2 S1)", /settings\.liveTradingPackEnabled === true && settings\.liveTradingPrefillEnabled === true\);/.test(content));
-t("paper guard still keys on paperOrderSubmissionEnabled === false (unchanged)", /paperOrderSubmissionEnabled === false\) return false;/.test(content));
+t("paper guard still keys on paperOrderSubmissionEnabled === false (unchanged)", /paperOrderSubmissionEnabled === false\) (?:\{ dayTradingSubmitDenyCause = "submit-toggle"; )?return false;/.test(content));
 t("live lockout regex has NON_LIVE + AGENT_ENTRY_LIVE_ONLY", /LIVE_LOCKOUT_RE = \/DAILY_TIER_\\w\+\|RISK_HALT\|BOT_HALTED\|NON_LIVE\|AGENT_ENTRY_LIVE_ONLY/.test(content));
 t("live lockout uses its own storage key", /liveTradingSubmitBlockedUntil/.test(content) && /liveTradingLastSubmit/.test(content));
 t("paper lockout keys are untouched", /dayTradingSubmitBlockedUntil/.test(content) && /dayTradingLastSubmit/.test(content));
 t("Submit Order on live page → guardLiveTradingSubmit", /\/live-trading\/i\.test\(location\.href\)\) \{\s*const g = await guardLiveTradingSubmit\(\);/.test(content));
-t("Enter/Space on live page (order field, Submit button, Scan/Sched, no target) → live guard (MM P6)", /\/\^\(Enter\|NumpadEnter\| \|Space\)\$\/\.test\(keyName\) && \/live-trading\/i\.test\(location\.href\)/.test(content) && /target\.id === "btnScanExec" \|\| target\.id === "btnSchedStart"\)\) \{ \/\/ MM 6aa484e7 P6/.test(content));
+t("Enter/Space on live page (order field, Submit button, Scan/Sched, no target) → live guard (MM P6)", /\/\^\(Enter\|NumpadEnter\| \|Space\)\$\/\.test\(keyName\) && \/live-trading\/i\.test\(location\.href\)/.test(content) && /target\.id === "btnScanExec" \|\| target\.id === "btnSchedStart"\)\) \{ \/\/ an internal review P6/.test(content));
 t("fill+submit on ANY live-page field → live guard (MM P3)", /if \(submit && \/live-trading\/i\.test\(location\.href\)\) \{/.test(content) && !/submit && \/live-trading\/i\.test\(location\.href\) && isOrderField\(el\)/.test(content));
 t("Scan+Execute gated on the live page AND bound by the lockout latch; Sched buttons refused outright (MM P5 + pass 3 L9)", /\/live-trading\/i\.test\(location\.href\) && el\.id === "btnScanExec"\) \{[^\n]*\n\s*if \(!\(await liveTradingSubmitAllowed\(\)\)\)[^\n]*\n\s*const g = await guardLiveTradingSubmit\(\); if \(g\) return g;/.test(content) && /btnSchedStart\|btnSchedStop\)\$\//.test(content));
 t("paper submit guard on day-trading page still present (4 vectors)", count(content, /guardDayTradingSubmit\(\)/g) >= 4);
@@ -110,13 +110,13 @@ t("live page → /api/live-trading cap endpoint", /\/api\/live-trading\/session-
 t("paper page → /api/day-trading cap endpoint (unchanged)", /\/api\/day-trading\/session-goals\/agent-cap/.test(tools));
 t("apiPath is passed as an executeScript arg (no hardcoded fetch)", /const res = await fetch\(apiPath, \{/.test(tools));
 
-console.log("— master-mind 6aa484e765a373ca07804de8 fix pass pins —");
+console.log("— an internal review fix pass pins —");
 t("P1: resumeAgent restores liveTradingPackInjected and re-derives it from the active live tab", /let liveResumed = state\.liveTradingPackInjected === true;/.test(bg) && /if \(active && needsLiveTradingPack\(active\.url\)\) liveResumed = true;/.test(bg) && /liveTradingPackInjected: liveResumed,/.test(bg));
 t("P1: resumePhased loopCtx carries liveTradingPackInjected", /fsInfo,\s*liveTradingPackInjected: await/.test(bg));
 t("P2: desktop action tools refused on the live page", /Desktop control is DISABLED on the Live Trading \(real-money\) page/.test(tools));
 t("P2: http_request cannot mutate the live-trading API", /http_request cannot POST\/PUT\/DELETE to the live-trading API/.test(tools));
 t("P2: live runs drop desktop action tools + run_command from the schema", /if \(ctx\.liveTradingPackInjected\) \{ \/\/ REAL-MONEY run: no OS control, no shell/.test(bg));
-t("P2: desktop action tools always confirm", /\.\.\.DESKTOP_ACTION_TOOL_NAMES, \/\/ MM 6aa484e7 P2/.test(bg));
+t("P2: desktop action tools always confirm", /\.\.\.DESKTOP_ACTION_TOOL_NAMES, \/\/ an internal review P2/.test(bg));
 t("P4: children bound to the live tab are read-only", /childLiveReadOnly = true;/.test(bg) && /readOnly: parentCtx\.readOnly \|\| childM1ReadOnly \|\| childLiveReadOnly,/.test(bg));
 t("P5: no double-click on the live page", /\/live-trading\/i\.test\(location\.href\) && double\) double = false;/.test(content));
 t("P8: Reset clears the local live kill-switch", /await saveLiveSubmitEnabled\(false\); el\("liveOrderSubmissionEnabled"\)\.checked = false;/.test(options));
@@ -127,7 +127,7 @@ t("P11: live scalp overlay has its own body and imports nothing from the paper o
 t("P11: strategy caches are keyed by phaseFilesUrl", /_cache\.base === base/.test(src) && /_scalpCache\.base === base/.test(src));
 t("Low: dup-signature includes the thesis", /g\("orderThesis"\)\]\.join/.test(content));
 
-console.log("— master-mind 6aa490c665a373ca0780563b pass-2 ship-with pins —");
+console.log("— an internal review pass-2 ship-with pins —");
 t("S2: bot controls unconditionally off-limits on the live page", /REAL-MONEY bot controls are OFF-LIMITS to the agent/.test(content) && /\/\^\(btnCloseAll\|btnHalt\|btnPause\|btnResume\|btnFlatten\|btnSchedStart\|btnSchedStop\)\$\//.test(content));
 t("S3: executor-level refusal of run_command / desktop actions on a live run", /REAL-MONEY run: OS control and shell are refused \(schema-stripped and executor-refused\)/.test(bg));
 t("S3: live flag reaches the executor ctx", /liveTradingPackInjected: ctx\.liveTradingPackInjected === true \}\)/.test(bg));
@@ -138,7 +138,7 @@ t("S7: pre-validate helper is paper-page only", /args\.selector && !ctx\.liveTra
 t("Low: desktop_screenshot under the vision ban", /name === "capture_screenshot" \|\| name === "desktop_screenshot"/.test(bg));
 t("Low: submit label with all three toggles", /REAL MONEY/.test(liveTradingModeLabel({ liveOrderSubmissionEnabled: true, liveTradingPrefillEnabled: true })) && /submit/.test(liveTradingModeLabel({ liveOrderSubmissionEnabled: true, liveTradingPrefillEnabled: true })));
 
-console.log("— master-mind 6aa49b0d65a373ca078075c2 pass-3 pins —");
+console.log("— an internal review pass-3 pins —");
 t("L1: paper Scan/Sched return uses the in-scope txt2 (no ReferenceError fall-through)", /Autonomous execution is OFF — \\"" \+ \(txt2 \|\| el\.id\)/.test(content) && !/Autonomous execution is OFF — \\"" \+ \(txt \|\| el\.id\)/.test(content));
 t("L2: click guard catches fail CLOSED on trading pages (both blocks)", count(content, /Trading-page click guard failed/g) === 2);
 t("L3: drift guard covers read_page{url} (navLike)", /\(ACTION_TOOLS\.has\(name\) \|\| name === "press_key" \|\| navLike\)\) \{ \/\/ MM pass 3 L3/.test(bg));
@@ -147,14 +147,14 @@ t("L5+M1: generic submit helpers denied on the live page (dispatcher depth + exe
 t("L6: run_command refused while the live page is active", /run_command is DISABLED while the Live Trading \(real-money\) page is active/.test(tools));
 t("L7: an unbound child inherits the active live tab's pin", /tabId != null \? await chrome\.tabs\.get\(tabId\) : \(await chrome\.tabs\.query\(\{ active: true, lastFocusedWindow: true \}\)\)\[0\]/.test(bg));
 
-console.log("— master-mind 6aa4a4bc65a373ca0780dd7f pass-4 pins (before arming autonomous submit) —");
+console.log("— an internal review pass-4 pins (before arming autonomous submit) —");
 t("M2: live fill+submit is refused outright (one guarded Submit click only)", /REAL-MONEY fill\+submit is disabled\. Fill with submit:false/.test(content));
 t("M3: bot controls refused for keyboard activation on the live page", /REAL-MONEY bot controls are OFF-LIMITS to the agent \(keyboard\)/.test(content));
 t("M4: guardLiveTradingSubmit internal catches fail closed", count(content, /Cannot verify or persist REAL-MONEY submit safety state/g) === 2);
 t("N1: no review marker inside the paper reason string", !/places orders outside the manual form\. \/\* MM pass 3 L1 \*\//.test(content));
 t("L10: lockout reason no longer suggests toggling", !/toggle the live autonomous-submit switch off\/on/.test(content));
 
-t("N2: bot-control key refusal runs BEFORE the P6 latch and ignores document.body text", (() => { const a = content.indexOf("MM pass 4 M3 + pass 5 N2"); const b = content.indexOf("// MM 6aa484e7 P6"); return a > 0 && b > a && /target !== document\.body && target\.closest/.test(content); })());
+t("N2: bot-control key refusal runs BEFORE the P6 latch and ignores document.body text", (() => { const a = content.indexOf("MM pass 4 M3 + pass 5 N2"); const b = content.indexOf("// an internal review P6"); return a > 0 && b > a && /target !== document\.body && target\.closest/.test(content); })());
 
 console.log("— admin-tier-only gate (owner directive 2026-09-12) —");
 t("background re-checks admin entitlement at injection time", /REAL-MONEY section is ADMIN TIER ONLY/.test(bg) && /let liveAdminOk = false;/.test(bg) && /REAL-MONEY pack is admin-tier only/.test(bg));

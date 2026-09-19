@@ -734,7 +734,7 @@ el("reset").addEventListener("click", async () => {
   // Keep the account-bound values (backend URL) — reset only the behaviour settings.
   const cur = await getSettings();
   await saveSettings({ ...DEFAULTS, backendUrl: cur.backendUrl });
-  await saveLiveSubmitEnabled(false); el("liveOrderSubmissionEnabled").checked = false; // REAL-MONEY kill-switch off on reset (MM 6aa484e7 P8)
+  await saveLiveSubmitEnabled(false); el("liveOrderSubmissionEnabled").checked = false; // REAL-MONEY kill-switch off on reset (an internal review P8)
   fill({ ...DEFAULTS, backendUrl: cur.backendUrl });
   document.dispatchEvent(new CustomEvent("ag-settings-saved")); // reset writes finished
   flashMsg("✓ Reset to defaults");

@@ -1,7 +1,7 @@
 // phase-parsers.test.mjs — adversarial unit tests for the phase-engine gate
 // parsers + deterministic invariants. Plain node, no test framework:
 //   node phase-parsers.test.mjs
-// Covers consensus test cases T3, T4, T5, T6 (MM session 6a581885ae245ea624bdb64a)
+// Covers consensus test cases T3, T4, T5, T6 (an internal review)
 // plus the AWF-ported grammar behaviors. Author: iDevOpsLLC
 
 import {

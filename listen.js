@@ -29,7 +29,7 @@ const CONTEXT_MAX_CHARS = 3000; // transcript tail attached to prompts (local-mo
 let cb = null;                 // { run, bubble, isBusy, inputEl } injected by sidepanel.js
 let suppressCtxOnce = false;   // participation prompts already embed the transcript
 
-// Self-echo guard (master-mind 6aa946fb, must fix): with "speak" on, the reply
+// Self-echo guard (an internal review, must fix): with "speak" on, the reply
 // plays through the speakers and comes back through the mic or shared audio
 // as a transcript line. If that line contains the wake word, or ends in "?"
 // with no trigger set, the listener would answer itself in a loop. While our

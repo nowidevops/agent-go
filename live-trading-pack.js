@@ -32,7 +32,7 @@ export function needsLiveTradingPack(tabUrl) {
 
 // Resolve the active mode from settings (code-controlled, never from the .md).
 export function liveTradingMode(settings) {
-  if (settings && settings.liveOrderSubmissionEnabled === true && settings.liveTradingPrefillEnabled === true) return "submit"; // all three toggles (MM 6aa484e7 P7)
+  if (settings && settings.liveOrderSubmissionEnabled === true && settings.liveTradingPrefillEnabled === true) return "submit"; // all three toggles (an internal review P7)
   if (settings && settings.liveTradingPrefillEnabled === true) return "prefill";
   return "analyze";
 }
@@ -138,7 +138,7 @@ EXCLUDED: ${list.join(", ")}.`;
 
 // Strategy BODY — the part the served live-trading-strategy.md may override. Contains
 // NO order-submission permission language (modeBlock) — that is code-prepended.
-// HANDS OFF + NEVER FABRICATE are code-composed (MM 6aa484e7 P11): a served body cannot delete them.
+// HANDS OFF + NEVER FABRICATE are code-composed (an internal review P11): a served body cannot delete them.
 const HARD_RULES_BLOCK = `═══ HANDS OFF THE BOT CONTROLS ═══
 You operate ONLY the "Place Manual Order" form (plus its Validate button). Do NOT click the page's global bot controls — "Close All", "HALT", "Pause", "Resume", "Scan + Execute", the scheduler "Start", or anything under Settings — to make room for a trade or work around a rejection. If a dry-run returns MAX_POSITIONS (or any cap/lockout), that is a NO-TRADE this cycle. NEVER liquidate, halt, or pause existing positions/automation to open a new order. NEVER change the trading mode, the API keys, or any risk setting.
 
@@ -263,7 +263,7 @@ export async function buildLiveTradingPack(settings) {
 // ── LIVE SCALPING OVERLAY (opt-in, rides ONLY on an injected live pack) ─────────────────
 // Carries its OWN body, precedence header and served file (live-scalping-strategy.md), so a
 // paper-scalp edit never leaks into real money.
-// MM 6aa484e7 P11: the live overlay carries its OWN body (no import from the paper overlay) so a paper edit
+// an internal review P11: the live overlay carries its OWN body (no import from the paper overlay) so a paper edit
 // or a missing export can never change — or break — the real-money pack.
 const LIVE_SCALPING_BODY = `═══ WHAT A LIVE SCALP IS (in this app) ═══
 A scalp is a SHORT-HOLD momentum trade: enter on an immediate intraday trigger, exit within minutes at the first structural objective, never "give it room". You are still bound by every rule of the live-trading pack above — the scalp overlay only narrows WHICH trades qualify and how long you hold them. When a scalp criterion below is STRICTER than the base strategy, the scalp criterion wins; when it is looser, the base rule wins.

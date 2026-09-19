@@ -1,6 +1,6 @@
 {
   "name": "agent-go",
-  "version": "0.2.22",
+  "version": "0.2.25",
   "private": true,
   "type": "module",
   "description": "Agent Go browser extension - open-source release",

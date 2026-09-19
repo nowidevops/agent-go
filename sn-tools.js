@@ -912,7 +912,7 @@ function summarizeDenials(list) {
 // FIX SCRIPT route — the owner's own answer to "ServiceNow (MCP) refuses the
 // write" (STRY0000001, 2026-09-02 20:09 UTC: sys_script_fix
 // 00000000000000000000000000000000 "STRY0000001 Update task text",
-// C:\redacted\path). A Fix Script runs server-side GlideRecord under NO table ACLs,
+// C:\redacted\path\). A Fix Script runs server-side GlideRecord under NO table ACLs,
 // so it changes sys_variable_value / wf_transition / wf_activity rows the Table
 // API (403) and the forms (read-only Value) refuse for the same user. The record
 // itself is creatable through the API or its own form; running it is one

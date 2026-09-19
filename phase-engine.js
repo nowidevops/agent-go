@@ -2,7 +2,7 @@
 // Ports the AgenticWorkflow engine's gate discipline (review → reverify →
 // one-shot repair → clarify, fail-closed everywhere) around the existing
 // agentLoop, which runs as the EXECUTE phase in EMBEDDED mode (BL-2).
-// Plan + consensus: IMPROVEMENTS_PHASE_ENGINE.md, MM session 6a581885ae245ea624bdb64a.
+// Plan + consensus: IMPROVEMENTS_PHASE_ENGINE.md, an internal review.
 //
 // Dependency shape (no circular imports — background.js passes its internals):
 //   deps = { agentLoop, chatStream, withModelLock, activeProvider }
@@ -76,12 +76,13 @@ import { UNSLOP_PACK } from "./unslop-pack.js"; // pure leaf module (static stri
 // completes. Ranking (user 2026-07-18: "glm-5.2 is the strongest / can play the Orchestrator"):
 //   glm-5.2:cloud       = ORCHESTRATOR + EXECUTE brain + reliable tail (strongest all-round)
 //   deepseek-v4-pro:cloud = REVIEW head    (deepest reasoning/verification, independent of glm)
-//   qwen3.5:397b:cloud    = REVERIFY head  (a 3rd independent perspective to refute the draft; fresh Qwen family)
+//   minimax-m3:cloud      = REVERIFY head  (a 3rd independent perspective to refute the draft;
+//                                          took the seat 2026-09-18 — Ollama Cloud retires qwen3.5:397b on 09-25)
 //   kimi-k2.7-code:cloud  = REPAIR head    (code-specialist — best at the corrected fix)
 const DEFAULT_ROLES = {
   orchestrator: [{ provider: "ollama", model: "glm-5.2:cloud" }, { provider: "ollama", model: "deepseek-v4-pro:cloud" }],
-  review:   [{ provider: "ollama", model: "deepseek-v4-pro:cloud" }, { provider: "ollama", model: "qwen3.5:397b:cloud" }, { provider: "ollama", model: "glm-5.2:cloud" }],
-  reverify: [{ provider: "ollama", model: "qwen3.5:397b:cloud" }, { provider: "ollama", model: "kimi-k2.7-code:cloud" }, { provider: "ollama", model: "glm-5.2:cloud" }],
+  review:   [{ provider: "ollama", model: "deepseek-v4-pro:cloud" }, { provider: "ollama", model: "glm-5.2:cloud" }],
+  reverify: [{ provider: "ollama", model: "minimax-m3:cloud" }, { provider: "ollama", model: "kimi-k2.7-code:cloud" }, { provider: "ollama", model: "glm-5.2:cloud" }],
   repair:   [{ provider: "ollama", model: "kimi-k2.7-code:cloud" }, { provider: "ollama", model: "glm-5.2:cloud" }],
   // AWF-parity EXECUTE SPECIALIST ROLES (Local LLM 2026-07-19u, ported 2026-09-02): the PLAN
   // tags each subtask with one of {tools,code,bulk,research}; EXECUTE routes it to that
@@ -525,7 +526,7 @@ async function gateDeliverable(deps, ctx, draft, suffix, drafterIdentities, post
   // it activates ONLY when web tools were used, so ServiceNow strictness is
   // untouched (the 19u NVDA run honestly reported sources but couldn't state a
   // number because the reviewer demanded exact-value grounding it couldn't see).
-  // Research-genre detection (MM review 6a5d90ea, 2026-07-19y — P1 fixes):
+  // Research-genre detection (an internal review, 2026-07-19y — P1 fixes):
   //  (1) require e.success — a FAILED web call is not evidence and must not
   //      flip the genre (old code let a failed fetch_page relax the gate);
   //  (2) http_request dropped from WEB_EVIDENCE_TOOLS upstream (too generic);
@@ -940,7 +941,7 @@ export async function runPhased(deps, loopCtx) {
         await clearPhaseState();
         return { status: "error", runId };
       }
-      // P0 INDEPENDENCE (MM review 6a5d90ea, 2026-07-19y): every model that
+      // P0 INDEPENDENCE (an internal review, 2026-07-19y): every model that
       // AUTHORED surviving content is a drafter and must be excluded from the
       // reviewer/reverify roster — otherwise, when a single subtask survives, its
       // own author could review it and be reported "independent." Feed all
@@ -1203,7 +1204,7 @@ async function gateAndFinalize({ deps, ctx, post, signal, runId, taskText, ledge
     const subtaskLine = roleCounts
       ? `${plan.subtasks.length} subtasks (${Object.entries(roleCounts).map(([r, n]) => `${r}×${n}`).join(", ")})`
       : "single-focus (fast path)";
-    // Honest readiness pill (MM review 6a5d90ea, 2026-07-19y — P2): a GO is not
+    // Honest readiness pill (an internal review, 2026-07-19y — P2): a GO is not
     // unconditionally "ready for production." A web-research GO certifies the
     // figures are SOURCED, not that each number was value-matched to the page —
     // spot-check before acting. A degraded-same-model GO wasn't independently

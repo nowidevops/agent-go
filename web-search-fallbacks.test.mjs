@@ -95,7 +95,7 @@ function stubFetch(map) {
   ok("backend order is ddg html, ddg lite, bing rss", W.WEB_SEARCH_BACKENDS.map((b) => b.name).join(",") === "duckduckgo,duckduckgo-lite,bing-rss");
 }
 
-console.log("\nC. 09l hardening (MM 6aa23373 follow-ups)");
+console.log("\nC. 09l hardening (an internal review follow-ups)");
 {
   const bare = `<table><tr><td><form><input name="q"></form></td></tr></table><table><tr><td>1.</td><td><a rel="nofollow" href=//duckduckgo.com/l/?uddg=https%3A%2F%2Follama.com%2F class='result-link'>Ollama</a></td></tr>
 <tr><td></td><td class='result-snippet'>Run models locally.</td></tr></table><div class='result-snippet'>FOOTER AD</div>`;

@@ -1,5 +1,5 @@
 // demo-workflows.test.mjs — pins seedDemoWorkflows() (teach.js) and the shipped demo-workflows.json.
-// Hardened rules after Master-Mind 6aa769f6: all-or-nothing within the 50 cap, demo marker, repoint only our rows,
+// Hardened rules after an internal review: all-or-nothing within the 50 cap, demo marker, repoint only our rows,
 // flag only when every demo is present, one combined write, one Web Lock for every list writer.
 // Run: node demo-workflows.test.mjs   (stubs chrome.storage / chrome.runtime / fetch / navigator.locks)   Author: iDevOpsLLC
 import fs from "node:fs";
@@ -146,7 +146,7 @@ ok("side panel run list prefixes demo rows", /\$\{w\.demo \? "Demo · " : ""\}\$
 const bg = fs.readFileSync(new URL("./background.js", import.meta.url), "latin1");
 ok("service worker seeds on install and on browser start", (bg.match(/seedDemoWorkflows\(\)/g) || []).length >= 2 && /onStartup[\s\S]{0,200}seedDemoWorkflows/.test(bg));
 
-// 9. Master-Mind 6aa7700c follow-up (1.0.14 / 0.2.20).
+// 9. an internal review follow-up (1.0.14 / 0.2.20).
 reset(); manifest = {};
 store.teachWorkflows = [{ id: "a", name: "Dup", steps: ["x"], parameters: [] }, { id: "b", name: "Dup", steps: ["y"], parameters: [] }];
 lockCalls = 0; maxDepth = 0;

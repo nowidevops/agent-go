@@ -2919,7 +2919,7 @@ export async function executeTool(name, args = {}, ctx = {}) {
   //   2. (M1 fail-closed happens above via M1_SAFE_AT_EXECUTOR, which excludes
   //      every desktop_* name, so they're already refused on the M1 origin.)
   if (DESKTOP_TOOL_NAMES.has(name)) {
-    if (DESKTOP_ACTION_TOOL_NAMES.has(name)) { // REAL-MONEY page: an OS-level click bypasses every content.js submit guard (MM 6aa484e7 P2)
+    if (DESKTOP_ACTION_TOOL_NAMES.has(name)) { // REAL-MONEY page: an OS-level click bypasses every content.js submit guard (an internal review P2)
       try { const lt = await resolveTab(ctx); if (lt && /live-trading/i.test(lt.url || "")) return { error: "Desktop control is DISABLED on the Live Trading (real-money) page — an OS-level click bypasses the submit guards. Use click_element / fill_input / press_key." }; } catch {}
     }
     if (!ctx.settings || !ctx.settings.desktopControlEnabled) {
@@ -3011,7 +3011,7 @@ export async function executeTool(name, args = {}, ctx = {}) {
       if (seg === "..") { const i = acc.lastIndexOf("/"); return i < 0 ? "" : acc.slice(0, i); }
       return acc + "/" + seg;
     }, "") || "/";
-    if (mutating && /^\/api\/live-trading(?:\/|$)/i.test(_path)) { // MM 6aa484e7 P2 + pass 2 S5
+    if (mutating && /^\/api\/live-trading(?:\/|$)/i.test(_path)) { // an internal review P2 + pass 2 S5
       return { error: "http_request cannot POST/PUT/DELETE to the live-trading API — real-money orders go through the guarded form (Validate → Submit Order) only." };
     }
     const headers = {};
@@ -3330,7 +3330,7 @@ export async function executeTool(name, args = {}, ctx = {}) {
     // 2026-09-11: the REAL-MONEY page (live-trading.html) has its own module + own cap; the tool
     // targets whichever module owns the ACTIVE page and never crosses over.
     const isLivePage = !!(dtTab && /live-trading/i.test(dtTab.url || ""));
-    if (!isLivePage && ctx && ctx.settings && ctx.settings.riskPostureEnabled === false) { // paper toggle governs the paper page only (MM 6aa484e7 P9)
+    if (!isLivePage && ctx && ctx.settings && ctx.settings.riskPostureEnabled === false) { // paper toggle governs the paper page only (an internal review P9)
       return { error: "set_session_max_loss is disabled — the 'risk posture' toggle in the extension Options is OFF." };
     }
     if (isLivePage && ctx && ctx.settings && ctx.settings.liveRiskPostureEnabled === false) {

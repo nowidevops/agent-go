@@ -66,7 +66,7 @@ async function loadBody(settings) {
       const res = await fetch(`${base}/scalping-strategy.md`, { cache: "no-store", signal: ctrl.signal });
       if (res.ok) {
         const md = (await res.text()).trim();
-        // Shape guard (master-mind 6aa46229 / 6aa4632f): HTML index-page fallbacks are not a body.
+        // Shape guard (an internal review): HTML index-page fallbacks are not a body.
         if (md.length > 200 && !/^\s*<(?:!doctype|html|head|body)/i.test(md) && /WHAT A SCALP IS/i.test(md)) {
           _cache = { text: md, ts: now, source: "live:scalping-strategy.md" };
           return md;

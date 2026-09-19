@@ -142,7 +142,7 @@ export async function teachStop(narration, settings) {
     workflow.eventCount = events.length;
     workflow.recordedSteps = recordedSteps;            // raw, ungeneralized capture
     workflow.narration = (narration || "").slice(0, 1000);
-    // At the cap, refuse the save instead of silently dropping the oldest saved row (Master-Mind 6aa7700c B2).
+    // At the cap, refuse the save instead of silently dropping the oldest saved row (an internal review B2).
     const saved = await withWorkflowsLock(async () => {
       const list = await readWorkflowList(); // returns a name-deduped list
       if (list.length >= WORKFLOW_CAP) return false;
@@ -340,7 +340,7 @@ Output ONLY a JSON object:
 
 // Every writer of teachWorkflows (recording save, delete, clear all, demo seeding) runs under one Web Lock, so the
 // options page, the side panel and the service worker can't overwrite each other's read-modify-write
-// (Master-Mind 6aa769f6 #4). Runs directly where navigator.locks is missing (tests).
+// (an internal review #4). Runs directly where navigator.locks is missing (tests).
 const WORKFLOWS_LOCK = "agent-go-teach-workflows";
 function withWorkflowsLock(fn) {
   const locks = globalThis.navigator && globalThis.navigator.locks;
@@ -353,7 +353,7 @@ async function readWorkflowList() {
   if (dedupeNames(list)) await chrome.storage.local.set({ teachWorkflows: list });
   return list;
 }
-// readWorkflowList's dedupe heal is a write, so outside readers take the lock too (Master-Mind 6aa7700c B1).
+// readWorkflowList's dedupe heal is a write, so outside readers take the lock too (an internal review B1).
 // Never call getWorkflows from inside withWorkflowsLock: Web Locks are not reentrant.
 export async function getWorkflows() {
   return withWorkflowsLock(() => readWorkflowList());
@@ -368,7 +368,7 @@ export async function clearWorkflows() {
   return withWorkflowsLock(() => chrome.storage.local.set({ teachWorkflows: [] }));
 }
 
-// Demo workflows (2026-09-14, hardened after Master-Mind 6aa769f6). demo-workflows.json holds the two workflows from
+// Demo workflows (2026-09-14, hardened after an internal review). demo-workflows.json holds the two workflows from
 // the Saved workflows video (caregiver search, home care claim). They open the public, fictional demo pages at
 // https://ai.nowidevops.com/demo/, so anyone can run them. Seeded rows carry demo: true and show a Demo badge.
 // - Release build (manifest has the stamped key): added once per DEMO_SEED_VERSION. A demo the user deletes stays
@@ -408,7 +408,7 @@ export async function seedDemoWorkflows() {
       const { demoWorkflowsSeeded } = await chrome.storage.local.get("demoWorkflowsSeeded");
       let added = 0, repointed = 0, marked = 0;
       // Canonical names of the demos already in the list. A user's own row that only shares a demo's name does not
-      // count, so it can't hide the demo or latch the flag (Master-Mind 6aa7700c B3).
+      // count, so it can't hide the demo or latch the flag (an internal review B3).
       const ours = new Set();
       for (const w of list) {
         const fresh = demoFor(w, byName, byId);

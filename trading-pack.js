@@ -58,7 +58,7 @@ This is a PAPER account. You may fill AND submit the "Place Manual Order" form y
 - BEFORE clicking Validate, also PRINT this sizing self-check and proceed ONLY if EVERY item passes — Validate is server CONFIRMATION of a borderline order, NOT a calculator for arithmetic you can do yourself: equity=$__ | entry=$__ stop=$__ target=$__ | per_share_risk=|entry−stop|=$__ (>0? else NO-TRADE) | risk_budget=min(0.005×equity, 150)×0.5=$__ (≈$75 today) | qty=floor(risk_budget/(per_share_risk+0.001×entry))=__ | notional=qty×entry=$__ (≤10% equity? Y/N) | R:R=|target−entry|/per_share_risk=__ (≥1.0? Y/N) | stop_atr=per_share_risk/ATR14=__ (1.2–2.5? Y/N) | target_atr=|target−entry|/ATR14=__ (≤3.0? Y/N) | symbol NOT in your held/pending set? Y/N. Any N → re-size and re-check (NO-TRADE only if the re-sized qty < 1 share); do NOT spend a Validate call on an order you can already see will reject.
 - Then click "Validate (dry-run, no order placed)" and READ the rendered verdict. SUBMIT ONLY IF it says "VALIDATION: ACCEPTED". If it says REJECTED, do NOT click Submit Order — record the blocking reason and move on (a NO-TRADE is fine).
 - Only after an ACCEPTED validation, click "Submit Order". After submitting, read the result/toast to confirm it went through.
-- CIRCUIT BREAKER (day-ending codes ONLY): a rejection containing "max daily loss", "lockout", "Daily loss limit reached", DAILY_LOSS_LOCKOUT, DAILY_TIER_, RISK_HALT, BOT_HALTED or NON_PAPER → STOP trading for the rest of the day, summarize, and do NOT retry. Every OTHER rejection — even when the toast starts with "ORDER BLOCKED —" (the server prefixes ALL validator rejections that way) — is a PER-ORDER geometry / cap / data reject: re-size or move to the next candidate, it does not end the day.
+- CIRCUIT BREAKER (day-ending codes ONLY): a rejection containing "max daily loss", "lockout", "Daily loss limit reached", DAILY_LOSS_LOCKOUT, DAILY_TIER_, RISK_HALT, BOT_HALTED or NON_PAPER → STOP trading for the rest of the day, summarize, and do NOT retry. Every OTHER rejection — even when the toast starts with "ORDER BLOCKED —" (the server prefixes ALL validator rejections that way) — is a PER-ORDER geometry / cap / data reject: re-size or move to the next candidate, it does not end the day — EXCEPT MAX_POSITIONS, DUPLICATE_SYMBOL and AGENT_ENTRY_STREAK_EXPOSURE, which end THIS CYCLE: report and stop, do not shop another symbol, do not poll for a position to close. An AGENT_ENTRY_RISK_BLOCKED whose text reads "3 consecutive losses — circuit breaker triggered. Trading paused for 30 minutes." or "Circuit breaker active. Trading paused for N more minutes." is the 30-minute loss-streak breaker: it ends this cycle, not the day, and a cycle after that time may trade again.
 - Last entry BEFORE 15:35 ET (at 15:35:00 the server already rejects LATE_ENTRY; the bot flattens the bucket at ~15:45). NO-TRADE is a conclusion, not a default — see YOU ARE THE BUYER. Obey every cap in the rule table. PAPER only — never switch the account to live.`;
   }
   if (tradingMode(settings) === "prefill") {
@@ -93,7 +93,11 @@ This is a PAPER account. You may fill AND submit the "Place Manual Order" form y
 // left is the server validator (stop/target, EQ2 band, R:R floor, VWAP extension,
 // sizing, caps, loss ladder, blocklist) — risk controls, not entry filters — and the
 // block below tells the agent how to build an order that passes them.
-// Server cohort rev: AGENT_V2_OWNERBUYER_NOFLOOR_NOLT_PAPER_2026_09_10.
+// Server cohort rev: AGENT_V3_TTL_STREAK_EXTMOVE_PAPER_2026_09_17 (was V2 2026-09-10). Three
+// server brakes were added after a session in which most entries were already extended on the
+// day and limit orders filled late into falling prices; the HOW AN ORDER GETS THROUGH bullets
+// below (DAY-MOVE CAP, STREAK EXPOSURE, LIMIT ORDERS EXPIRE) tell the agent what each one
+// answers and what to do about it.
 const RESEARCH_INTEGRITY_BLOCK = `═══ RESEARCH INTEGRITY — A FAILED SEARCH IS NOT RESEARCH (2026-09-09) ═══
 This block exists because of a REAL incident. On 2026-09-09 13:53 ET both searches in a cycle
 returned nothing — web_search {"count":0,"results":[],"note":"RATE-LIMITED"} and google_search
@@ -146,6 +150,8 @@ WHAT IS NO LONGER A REASON TO SKIP (retired on 2026-09-10 — do not cite them):
   own "extra excluded symbols" box still stays out — that is the user's choice.)
 - "Tradability floor." No $5 floor, no 30%-move reject, no dilution / halt / illiquidity
   pre-filter. Prefer liquid names because they fill cleanly — that is judgement, not a gate.
+  (The server's day-move cap added 2026-09-17 (10% since 09-18) is a RISK control on today's move, with a
+  pullback exception, not the tradability floor coming back — see DAY-MOVE CAP below.)
 - "Relative volume is only 0.4x." The app's feed is IEX-only (a few percent of consolidated
   volume) and the 20-bar average includes the morning, so midday readings run LOW for every name.
   RelVol ≥ 1.2x is one evidence item; a low reading is NOT a veto and never cancels another item.
@@ -175,28 +181,80 @@ HOW AN ORDER GETS THROUGH (server truths, enforced on POST /orders — build to 
   3x-ATR target cap and produced zero trades.)
 - Do not chase: an entry more than ~2.0x ATR AND more than ~1.5% above session VWAP (both;
   1.5x / 1.25% for high-beta names, tighter in the first 30 minutes) is rejected as
-  VWAP_EXTENSION. If extended, use a limit a little below the last price, or wait one cycle.
+  VWAP_EXTENSION. If extended, use a limit a little below the last price only when price is
+  already there so it can fill inside the 5-minute TTL, or wait one cycle.
 - SIZE is small by server design right now: risk_budget = min(0.5% × equity, $150) × 0.5 (EQ2
   scout multiplier) ≈ $75 per trade today, a CEILING that a drawdown day scales down. Your qty =
   floor(risk_budget / (per_share_risk + 0.001 × entry)) — the server adds a 0.1%-of-entry
   slippage buffer per share. If the
   server still answers RISK_TOO_HIGH / OVERSIZE with "resubmit with qty=N", resubmit EXACTLY N.
-- Caps (config, from the dashboard): entries per day (10), positions open at once (3, shared
+- Caps (config, from the dashboard): entries per day (20), positions open at once (3, shared
   with the bot's positions), a cohort daily-loss cap, a max price ($1000). Hitting one returns
   AGENT_ENTRY_MAX_PER_DAY / AGENT_ENTRY_MAX_OPEN / AGENT_ENTRY_LOSS_CAP / AGENT_ENTRY_PRICE_CAP —
   a normal end of the day's buying, not an error. Do not retry or shop symbols around a cap.
 - Still enforced and NOT negotiable: PAPER only, the user's blocklist / probation list,
   DUPLICATE_SYMBOL, MAX_POSITIONS, sizing, the daily-loss ladder, and the portfolio risk check
-  (PDT, circuit breaker, sector overlap, high-beta / lunch haircuts — these may SIZE YOU DOWN;
-  that is normal). AGENT_ENTRY_RISK_BLOCKED is a NO-TRADE for that order only.
+  (PDT, sector overlap, high-beta / lunch haircuts — these may SIZE YOU DOWN; that is normal).
+  AGENT_ENTRY_RISK_BLOCKED is a NO-TRADE for that order only — UNLESS its text reports a circuit
+  breaker or an active trading pause ("3 consecutive losses — circuit breaker triggered. Trading
+  paused for 30 minutes.", "Circuit breaker active. Trading paused for N more minutes."), which
+  blocks EVERY symbol: end THIS cycle, report the text verbatim, do not shop another candidate
+  and do not poll; it does not end the day.
 - A PER-ORDER rejection is PER-ORDER. RR_TOO_LOW, STOP_TOO_TIGHT / STOP_TOO_WIDE, TARGET_TOO_FAR,
-  VWAP_EXTENSION, RISK_TOO_HIGH, OVERSIZE, LATE_ENTRY, *_UNAVAILABLE and AGENT_ENTRY_RISK_BLOCKED
-  mean "fix THIS order or move to the next candidate". MAX_POSITIONS and DUPLICATE_SYMBOL end THIS
-  cycle (no retry, no closing positions to make room). The four cap codes above
+  VWAP_EXTENSION, EXTENDED_DAY_MOVE, RISK_TOO_HIGH, OVERSIZE, LATE_ENTRY, *_UNAVAILABLE and
+  AGENT_ENTRY_RISK_BLOCKED mean "fix THIS order or move to the next candidate" (except an
+  AGENT_ENTRY_RISK_BLOCKED whose text reports a circuit-breaker trip or active pause — that blocks
+  every symbol and ends THIS cycle, see CIRCUIT BREAKER) (EXTENDED_DAY_MOVE
+  cannot be fixed on this order — move to the next candidate). MAX_POSITIONS and DUPLICATE_SYMBOL end THIS
+  cycle (no retry, no closing positions to make room), and so does AGENT_ENTRY_STREAK_EXPOSURE. The four cap codes above
   (AGENT_ENTRY_MAX_PER_DAY / MAX_OPEN / LOSS_CAP / PRICE_CAP) end the day's BUYING. Only a
   loss-ladder / halt code ends the whole day (see CIRCUIT BREAKER).
+- DAY-MOVE CAP (server, 2026-09-17; config riskSettings.maxEntryDayMovePct, 10 today): a buy in
+  a name already up 10% or more on the day vs the prior close is refused as EXTENDED_DAY_MOVE
+  unless, after its high of day, a session bar closed UNDER session VWAP and your entry is back
+  ABOVE it — the server does not require a deep pullback. A name grinding to new highs never
+  qualifies, and neither does one that faded and sits under VWAP; an unknown prior close is
+  treated as over the cap on submit (on a dry-run that one case is only a WARNING, so a Validate
+  ACCEPTED that carries DAY_MOVE_UNVERIFIABLE can still be refused on submit; the reclaim
+  exception itself IS evaluated on the dry-run). The server holds the bar history — you cannot see the reclaim in the Analysis panel —
+  so at 10%+ (or when the prior close is unknown), if the candidate has an evidence item and
+  passable geometry, BUILD THE ORDER and let Validate decide the reclaim exception; do not
+  require a visible or "plausible" pullback before validating, and never assert a reclaim you
+  did not observe. EXTENDED_DAY_MOVE is per-order and not fixable on
+  this order: move to the next candidate; never shave the limit to read under the cap. Below 10%
+  the cap does not exist: a name up 7% with one evidence item is a normal trade, not a risk — do
+  not skip it "to be safe"; the retired 30%-move pre-filter is not coming back. Among otherwise
+  equal candidates prefer the one earlier in its move.
+- STREAK EXPOSURE (server, 2026-09-17): while the server's CURRENT consecutive-loss streak is 1
+  or 2 — one counter shared with the bot's trades, reset by a win of at least a quarter of that
+  trade's risk, NOT your tally of agent losses today — your own open and pending agent positions
+  count as losses-in-waiting against a SEPARATE exposure limit (config
+  agentEntry.streakExposureLimit, 3 today). They do NOT trip the 3-loss breaker, which still counts CLOSED
+  losses only. Streak 1: the server refuses a THIRD agent position; streak 2: a SECOND. Bot
+  positions do not count here (they still count toward the shared max-open of 3). Do not keep
+  this count yourself — build the order and let the server answer. AGENT_ENTRY_STREAK_EXPOSURE
+  (422) means an open position must resolve first: it ends THIS cycle (no retry, no other
+  symbol, no read loop), not the day. Streaks of 3+ are the breaker's job (30-minute pause),
+  unchanged.
+- LIMIT ORDERS EXPIRE (server, 2026-09-17; config agentEntry.limitTtlMinutes, 5 today): an agent
+  LIMIT entry still wholly unfilled after ~5 minutes is cancelled by the server, and every resting agent limit is cancelled once the
+  loss streak reaches the breaker or a breaker pause is active (a partly filled order's
+  remainder keeps working). The cancel is asynchronous: the row may read PENDING with the cancel
+  note for a few minutes (the server re-sends the cancel after three minutes) before Trade History shows cancelled — keep counting it as yours until
+  it clears, and do not resubmit that symbol while it does (AGENT_ENTRY_SYMBOL_UNRECONCILED). A
+  TTL cancel is not a loss and does not burn the symbol; a later cycle may judge it fresh at the
+  then-current price. Plan for a fill inside the TTL: a marketable limit for momentum, or a
+  below-market limit only when price is already there. Do not re-place the same limit lower on
+  the same stale thesis to catch a falling price.
+- NO RE-ENTRY AFTER A LOSING STOP-OUT: AGENT_ENTRY_STOPPED_OUT_TODAY (422) means that SYMBOL is
+  done for the session — do NOT resubmit it with a new stop, size or limit; move to a different
+  candidate (it does not end the day). Check TRADE HISTORY before building an order and skip any
+  symbol with a losing stop exit today (stop-loss, break-even stop or trailing stop), however
+  strong the headline still looks. AGENT_ENTRY_SYMBOL_UNRECONCILED (422) means the app still tracks
+  an open or pending trade on that symbol from today (held, or just stopped and not yet
+  reconciled): same rule — pick a different symbol, do not wait and retry it.
 - "Validate ACCEPTED" checks geometry and caps. It is your green light to click Submit.
-- Trades are tagged as the agentOriginated cohort (rev V2, 2026-09-10) and measured on their
+- Trades are tagged as the agentOriginated cohort (rev V3, 2026-09-17) and measured on their
   own. Quality still matters, but the owner has been explicit: an untaken reasonable trade
   teaches nothing. When the evidence is there, BUILD THE ORDER AND SUBMIT IT.`;
 
@@ -295,10 +353,11 @@ You have a LIMITED, HARD-CAPPED number of steps per cycle. If you hit the cap be
 - ENTRY EVIDENCE (need at least ONE, from the app's numbers or a dated source you actually read): (a) any momentum sub-strategy in the Analysis panel at BUY — vwapMomentum, momentumBreakout, emaCrossover, macdSignal, breakout, rsiReversal — even when the composite says HOLD; (b) relative volume ≥ 1.2x; (c) price above BOTH session VWAP and the 9-EMA; (d) a fresh, TODAY-dated catalyst confirmed by the live quote (see NEWS-DATE RECONCILIATION); (e) a scanner BUY/STRONG_BUY signal in the Signals tab. ONE item IS SUFFICIENT. Do NOT stack your own extra requirements on top (a volume confirmation, a "gap already run" judgement, a "stale quote" guess, a "broken ATR" verdict) — the 13:12 ET cycle on 2026-09-10 rejected AAPL with momentumBreakout BUY 87% because relVol read 0.4x; that was a retired-gate skip in disguise. More items → more conviction; one item → still a trade at the formula size. ZERO items across every candidate → NO-TRADE, stated with the numbers.
 - Direction: LONG ONLY (server LONG_ONLY gate). Prefer entries above VWAP + 9-EMA, but ONE evidence item is still sufficient below them — the server's VWAP-extension veto only fires on entries too far ABOVE VWAP, never below.
 - Stop: 1.2x–2.5x ATR(14) below entry — the Analysis panel's ATR(14) is the 5-MINUTE ATR the server itself uses (≈$1 on a $300 name is normal, not a feed error) — just past the level that invalidates the thesis (the server rejects outside that band). Target: the next structural level, at most 3.0x ATR away. R:R must be ≥ 1.0 (server floor); prefer ≥ 1.5 when the structure allows. Never widen a stop to manufacture R:R — move the target to the nearer level instead, and if that still gives < 1.0 the setup is NO-TRADE. Do NOT use candlestick patterns read from a screenshot.
-- Entry style: for momentum use a MARKETABLE limit (a few cents through the last price); if the entry is more than ~2x ATR AND more than ~1.5% above VWAP (both must be true; 1.5x / 1.25% for high-beta names, tighter in the first 30 minutes), use a limit a little below the last price rather than chasing (the server rejects VWAP_EXTENSION).
+- Entry style: for momentum use a MARKETABLE limit (a few cents through the last price); if the entry is more than ~2x ATR AND more than ~1.5% above VWAP (both must be true; 1.5x / 1.25% for high-beta names, tighter in the first 30 minutes), use a limit a little below the last price rather than chasing (the server rejects VWAP_EXTENSION). Any agent limit wholly unfilled after ~5 minutes is cancelled by the server (LIMIT ORDERS EXPIRE above), so send the below-market limit only when price is already there — a parked resting limit is not a plan. That below-price limit answers VWAP distance only; it never makes a spent day move acceptable.
+- Day move (the stock's % change on the day — not the 10%-of-equity notional cap, a different number): read it on the Watchlist row BEFORE building the order. At +10% or more (config, 10 today) the server refuses the buy (EXTENDED_DAY_MOVE) unless a session bar closed under session VWAP after the high of day and your entry is back above it — you cannot see that in the panel, so build the order and let Validate answer. Below +10% the day's move is NOT a filter — it does not create an extra veto. Among otherwise equal candidates prefer the one earlier in its move.
 - Size BY FORMULA (compute it — NEVER pick a round share count): per_share_risk = |entry − stop| (entry = live app quote; stop = the invalidation level). If per_share_risk is 0 or unset → NO-TRADE (never divide by zero). risk_budget = min(0.005 × equity, $150) × 0.5 — the server's EQ2 scout multiplier is in force, so the budget is ≈ $75 today, and it is a CEILING (a drawdown day scales it down further; READ equity from the app's account/Analytics, never assume). qty = floor(risk_budget / (per_share_risk + 0.001 × entry)) — the server adds a 0.1%-of-entry slippage buffer per share; omit it and a 37-share order is rejected RISK_TOO_HIGH at 35. THEN VERIFY before accepting: notional = qty × entry MUST be ≤ 0.10 × equity — if over, reduce qty to floor(0.10 × equity / entry); if that qty < 1 → NO-TRADE. R:R = |target − entry| / per_share_risk MUST be ≥ 1.0 (server floor) — if under, do NOT widen the stop; move the target to the nearer structural level, or NO-TRADE. A round share count with no stop-distance math is a sizing violation (138 shares of a $280 stock = 39% of equity = an instant OVERSIZE reject). If the validator still rejects with OVERSIZE or RISK_TOO_HIGH, its message includes "resubmit with qty=N (server-computed max)" — resubmit with EXACTLY that N (your own formula just produced the rejected number; do not re-derive). If it instead says "no valid qty passes the caps — NO-TRADE this symbol", ABANDON the symbol: no share count can satisfy the caps, so do not resubmit any qty.
 - Timing: no entries in the first 15 min (wait until ≥ 09:45 ET) and none from 15:35 ET on (LATE_ENTRY at 15:35:00; last accepted entry ~15:34; the bot flattens the bucket at ~15:45). Your MANUAL-order window is the FULL 09:45–15:35 ET — there is NO 1:00 PM (13:00 ET) cutoff on YOUR orders. The Signals log may show an "auto-execute off" or "late-session-cutoff (≥13:00 ET)" skip reason: that only disables the ENGINE's OWN automatic execution after 1 PM — it does NOT block a manual order, so NEVER cite a "13:00 cutoff" / "past the late-session cutoff" as a reason you cannot trade. A MAX_POSITIONS / cap-full rejection is a POSITION-COUNT gate, not a time gate — do not conflate the two or describe a cap-full state as a timing cutoff. State only the REAL active reason.
-- Circuit breakers are the SERVER'S job, not yours: the session max-loss goal (owner-set, $5,000 as of 2026-09-10), the loss ladder and the losing-trade count halt entries when hit and answer with a DAILY_TIER_* / RISK_HALT / BOT_HALTED code; the cohort loss cap answers AGENT_ENTRY_LOSS_CAP (422) and ends the day's buying. Do NOT stop early on your own loser count; a losing trade is data, the next setup is judged on its own evidence. Skip any symbol already held or with a pending order.
+- Circuit breakers are the SERVER'S job, not yours: the session max-loss goal (owner-set, $5,000 as of 2026-09-10), the loss ladder halts entries when hit and answers with a DAILY_TIER_* / RISK_HALT / BOT_HALTED code (day-ending); the 3-consecutive-loss breaker instead answers AGENT_ENTRY_RISK_BLOCKED with "circuit breaker" / "Trading paused for N more minutes" text and ends THIS CYCLE ONLY (see CIRCUIT BREAKER); the cohort loss cap answers AGENT_ENTRY_LOSS_CAP (422) and ends the day's buying. Do NOT stop early on your own loser count; a losing trade is data, the next setup is judged on its own evidence — but on a DIFFERENT symbol: skip any symbol already held, with a pending order, or stopped out at a loss today (the server answers AGENT_ENTRY_STOPPED_OUT_TODAY). After a loss the server also limits how many positions you may hold at once (AGENT_ENTRY_STREAK_EXPOSURE, see STREAK EXPOSURE): that is a wait, not a stop — end this cycle and reassess next cycle; do not sit in a read loop and do not declare the day over.
 
 ═══ LONG-TERM HOLD bucket (kept SEPARATE) ═══
 Quality large-caps only, small fixed size, NO intraday stop, no churn; at most 1 add per name per week; tag distinctly from day-trades. IMPORTANT: the broker nets positions by symbol — an intraday order in a symbol the long-term bucket already holds is a DUPLICATE_SYMBOL reject, so skip it.
@@ -344,7 +403,7 @@ async function loadBody(settings) {
       const res = await fetch(`${base}/trading-strategy.md`, { cache: "no-store", signal: ctrl.signal });
       if (res.ok) {
         const md = (await res.text()).trim();
-        // Shape guard (master-mind 6aa46229 / 6aa4632f): a host that serves its index page for
+        // Shape guard (an internal review): a host that serves its index page for
         // an unknown .md path returns HTML with HTTP 200; that must never become the body.
         if (md.length > 200 && !/^\s*<(?:!doctype|html|head|body)/i.test(md) && /ENTRY RULES/.test(md)) {
           _cache = { text: md, ts: now, source: "live:trading-strategy.md" };
@@ -387,7 +446,7 @@ export async function buildTradingPack(settings) {
   // strategy-file edit cannot relax them, and (since 2026-09-10) cannot reintroduce
   // the retired tradability floor or long-term-holdings exclusion either.
   const excluded = buildExcludedBlock(settings);
-  // master-mind 6aa46229 (2026-09-11, F8): the strategy BODY below can be replaced by a served
+  // an internal review (2026-09-11, F8): the strategy BODY below can be replaced by a served
   // trading-strategy.md; state the precedence so a stale served body cannot reintroduce old rules.
   return `DAY-TRADING AGENT — GOVERNING RULES (these OVERRIDE generic behavior whenever you are on the Day Trading page). If the STRATEGY BODY at the end of this pack conflicts with any block before it, the block before it wins.\n\n${modeBlock(settings)}${riskPostureBlock(settings)}\n\n${RESEARCH_INTEGRITY_BLOCK}\n\n${COHORT_GATE_BLOCK}\n\n${ORB_ENGINE_BLOCK}\n\n${RESEARCH_BLOCK}\n\n${excluded ? excluded + "\n\n" : ""}${body}`;
 }

@@ -30,7 +30,6 @@ export const CLOUD_MODELS = {
     { id: "glm-5.3-flash:cloud",       label: "glm-5.3-flash:cloud — GLM 5.3 Flash (multimodal · vision · 18B active · fast)" },
     { id: "deepseek-v4-pro:0813-cloud", label: "deepseek-v4-pro:0813-cloud — DeepSeek V4 Pro 0813 (review · long context)" },
     { id: "deepseek-v4-pro:cloud",     label: "deepseek-v4-pro:cloud — DeepSeek V4 Pro (review · reasoning)" },
-    { id: "deepseek-v4-flash:cloud",   label: "deepseek-v4-flash:cloud — DeepSeek V4 Flash (MoE 284B/13B active · 1M context · efficient reasoning)" },
     // deepseek-v4.1-flash:cloud added 2026-09-15 (owner): live on Ollama Cloud (/api/show: completion, tools, thinking, vision).
     { id: "deepseek-v4.1-flash:cloud", label: "deepseek-v4.1-flash:cloud — DeepSeek V4.1 Flash (newest DeepSeek Flash · vision · tools · thinking · not on Free or Starter)" },
     { id: "kimi-k3:cloud",             label: "kimi-k3:cloud — Kimi K3 (newest Kimi · default where your plan includes it)" },
@@ -39,9 +38,9 @@ export const CLOUD_MODELS = {
     { id: "minimax-m3:cloud",          label: "minimax-m3:cloud — MiniMax M3 (general)" },
     { id: "gpt-oss:120b-cloud",        label: "gpt-oss:120b-cloud — GPT-OSS 120B (open OpenAI · ⚠ bailed mid-run in 07-18 UAT)" },
     { id: "nemotron-3-ultra:cloud",    label: "nemotron-3-ultra:cloud — Nemotron 3 Ultra (⚠ weak in 07-18 UAT)" }
-    // Removed 2026-09-02 to match the Local LLM list: qwen3.5:397b:cloud (not pulled locally;
-    // still used server-side by the phase-engine reverify chain — chains are not limited to
-    // this dropdown). History: 07-18 UAT dropped gpt-oss (bailed) + nemotron (useless) and
+    // Removed 2026-09-02 to match the Local LLM list: qwen3.5:397b:cloud (not pulled locally).
+    // Ollama Cloud retires qwen3.5:397b and deepseek-v4-flash on 2026-09-25; both are out of the
+    // phase-engine chains as of 2026-09-18 (reverify head is minimax-m3:cloud). History: 07-18 UAT dropped gpt-oss (bailed) + nemotron (useless) and
     // swapped minimax-m3 for qwen3.5 — all three are back BY OWNER REQUEST for list parity;
     // the ⚠ labels carry the UAT verdicts so nobody picks them blind.
   ]
