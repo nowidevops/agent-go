@@ -77,6 +77,9 @@ export const MIN_NUM_CTX = 4096;
 // (settings.maxRoots is clamped to [1, this]). Mirrors HARD_MAX_ROOTS in fsaccess.js.
 export const MAX_CONNECTED_FOLDERS = 20;
 
+// kimi-k2.5 retired 2026-07-31; deepseek-v4-flash and qwen3.5:397b retired 2026-09-25.
+const RETIRED_MODELS = new Set(["kimi-k2.5:cloud", "deepseek-v4-flash:cloud", "qwen3.5:397b:cloud"]);
+
 function normalize(s) {
   const n = parseInt(s.numCtx, 10);
   s.numCtx = Number.isInteger(n) && n > 0 ? n : DEFAULTS.numCtx;
@@ -112,6 +115,9 @@ function normalize(s) {
   const loopback = (v) => { try { const u = new URL(String(v || "")); return (u.protocol === "http:" || u.protocol === "https:") && (u.hostname === "localhost" || u.hostname === "127.0.0.1"); } catch (_e) { return false; } };
   if (!loopback(s.whisperUrl)) s.whisperUrl = DEFAULTS.whisperUrl;
   if (!loopback(s.desktopUrl)) s.desktopUrl = DEFAULTS.desktopUrl;
+  // Ollama Cloud retired these tags (HTTP 410). A profile still pointing at one runs on Auto
+  // instead of failing every turn; the Options page then shows Auto and the next save stores it.
+  if (RETIRED_MODELS.has(s.model)) s.model = "";
   s.byokEffort = BYOK_EFFORTS.includes(s.byokEffort) ? s.byokEffort : "";
   if (s.byokProvider) { s.phaseEngineEnabled = false; } // Phase engine off under BYOK; Implementation-phases stays user-controllable (user request 2026-07-18)
   return s;

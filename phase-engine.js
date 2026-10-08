@@ -77,7 +77,7 @@ import { UNSLOP_PACK } from "./unslop-pack.js"; // pure leaf module (static stri
 //   glm-5.2:cloud       = ORCHESTRATOR + EXECUTE brain + reliable tail (strongest all-round)
 //   deepseek-v4-pro:cloud = REVIEW head    (deepest reasoning/verification, independent of glm)
 //   minimax-m3:cloud      = REVERIFY head  (a 3rd independent perspective to refute the draft;
-//                                          took the seat 2026-09-18 — Ollama Cloud retires qwen3.5:397b on 09-25)
+//                                          took the seat when Ollama Cloud retired qwen3.5:397b on 2026-09-25)
 //   kimi-k2.7-code:cloud  = REPAIR head    (code-specialist — best at the corrected fix)
 const DEFAULT_ROLES = {
   orchestrator: [{ provider: "ollama", model: "glm-5.2:cloud" }, { provider: "ollama", model: "deepseek-v4-pro:cloud" }],
@@ -88,10 +88,11 @@ const DEFAULT_ROLES = {
   // tags each subtask with one of {tools,code,bulk,research}; EXECUTE routes it to that
   // role's chain. Mapped onto Agent Go's Ollama-Cloud catalog: "tools" leads with $SELECTED
   // (the header model drives the browser), code → kimi-k2.7-code (code specialist),
-  // bulk → glm → kimi-k2.5 (cheap volume), research → glm → deepseek (fast reader first).
+  // bulk → glm → deepseek-v4.1-flash (fast volume; kimi-k2.5 was retired by Ollama Cloud 2026-07-31),
+  // research → glm → deepseek (fast reader first).
   "execute-tools":    [{ provider: "$SELECTED", model: "$SELECTED" }, { provider: "ollama", model: "glm-5.2:cloud" }],
   "execute-code":     [{ provider: "ollama", model: "kimi-k2.7-code:cloud" }, { provider: "ollama", model: "glm-5.2:cloud" }],
-  "execute-bulk":     [{ provider: "ollama", model: "glm-5.2:cloud" }, { provider: "ollama", model: "kimi-k2.5:cloud" }],
+  "execute-bulk":     [{ provider: "ollama", model: "glm-5.2:cloud" }, { provider: "ollama", model: "deepseek-v4.1-flash:cloud" }],
   "execute-research": [{ provider: "ollama", model: "glm-5.2:cloud" }, { provider: "ollama", model: "deepseek-v4-pro:cloud" }]
 };
 const KNOWN_ROLES = new Set(Object.keys(DEFAULT_ROLES));

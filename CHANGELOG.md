@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.33 — 2026-10-08
+
+- Retired models are out. Ollama Cloud retired `kimi-k2.5:cloud` (2026-07-31) and
+  `deepseek-v4-flash:cloud` (2026-09-25); both answer HTTP 410. They are gone from the model picker,
+  and the bulk-work chain falls back to `deepseek-v4.1-flash:cloud` instead of `kimi-k2.5:cloud`.
+  The download pack's review and reverify chains also dropped `qwen3.5:397b:cloud` (this source had
+  already moved them to `minimax-m3:cloud`).
+- A saved profile that still points at one of those three models runs on Auto instead of failing
+  every turn. The Options page shows Auto, and the next save stores it.
+
 ## 0.2.32 — 2026-10-07
 
 - `sn_set_field` can no longer freeze a run. It used to call `g_form.setValue` inside the injected

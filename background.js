@@ -56,7 +56,7 @@ initNetLog();
 // Build marker — bump on each change so you can confirm in the service-worker
 // console (chrome://extensions → "service worker") that a reload actually picked
 // up the new code. If you don't see this line after reloading, the worker is stale.
-const BUILD_TAG = "AGENT GO 0.2.32 — open-source release";
+const BUILD_TAG = "AGENT GO 0.2.33 — open-source release";
 console.log("[Local LLM] background.js loaded — build " + BUILD_TAG);
 
 // Race a promise against the run's AbortSignal so a hung awaited operation can be

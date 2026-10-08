@@ -31,18 +31,17 @@ export const CLOUD_MODELS = {
     { id: "glm-5.3-flash:cloud",       label: "glm-5.3-flash:cloud" },
     { id: "deepseek-v4-pro:0813-cloud", label: "deepseek-v4-pro:0813-cloud" },
     { id: "deepseek-v4-pro:cloud",     label: "deepseek-v4-pro:cloud" },
-    { id: "deepseek-v4-flash:cloud",   label: "deepseek-v4-flash:cloud" },
     // deepseek-v4.1-flash:cloud added 2026-09-15 (owner): live on Ollama Cloud (/api/show: completion, tools, thinking, vision).
     { id: "deepseek-v4.1-flash:cloud", label: "deepseek-v4.1-flash:cloud" },
     { id: "kimi-k3:cloud",             label: "kimi-k3:cloud" },
     { id: "kimi-k2.7-code:cloud",      label: "kimi-k2.7-code:cloud" },
-    { id: "kimi-k2.5:cloud",           label: "kimi-k2.5:cloud" },
     { id: "minimax-m3:cloud",          label: "minimax-m3:cloud" },
     { id: "gpt-oss:120b-cloud",        label: "gpt-oss:120b-cloud" },
     { id: "nemotron-3-ultra:cloud",    label: "nemotron-3-ultra:cloud" }
-    // Removed 2026-09-02 to match the Local LLM list: qwen3.5:397b:cloud (not pulled locally;
-    // still used server-side by the phase-engine reverify chain — chains are not limited to
-    // this dropdown). History: 07-18 UAT dropped gpt-oss (bailed) + nemotron (useless) and
+    // Removed 2026-10-08: kimi-k2.5:cloud and deepseek-v4-flash:cloud, which Ollama Cloud retired
+    // (2026-07-31 and 2026-09-25; both answer HTTP 410). qwen3.5:397b:cloud left this list 2026-09-02
+    // and the phase-engine chains on 2026-10-08 (retired 2026-09-25).
+    // History: 07-18 UAT dropped gpt-oss (bailed) + nemotron (useless) and
     // swapped minimax-m3 for qwen3.5 — all three are back BY OWNER REQUEST for list parity;
     // the ⚠ labels carry the UAT verdicts so nobody picks them blind.
   ],
