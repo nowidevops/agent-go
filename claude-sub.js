@@ -16,7 +16,8 @@
 export const CLAUDE_SUB_DEFAULT_MODEL = "claude-fable-5-1";
 // Retired ids still saved in Options / phaseModels JSON map to the successor
 // so an upgrade never sends a dead model id to the CLI bridge (2026-09-01).
-const LEGACY_MODEL_ALIASES = { "claude-fable-5": CLAUDE_SUB_DEFAULT_MODEL, "claude-fable-5.1": CLAUDE_SUB_DEFAULT_MODEL };
+// 2026-10-01: Opus 5 / Sonnet 5 were succeeded by 5.5; saved presets move with them.
+const LEGACY_MODEL_ALIASES = { "claude-fable-5": CLAUDE_SUB_DEFAULT_MODEL, "claude-fable-5.1": CLAUDE_SUB_DEFAULT_MODEL, "claude-opus-5": "claude-opus-5-5", "claude-sonnet-5": "claude-sonnet-5-5" };
 export function normalizeSubModel(id) { return LEGACY_MODEL_ALIASES[id] || id; }
 
 // The transcript is a TEXT protocol, so untrusted content (page text in tool

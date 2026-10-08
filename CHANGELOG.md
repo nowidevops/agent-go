@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.2.32 — 2026-10-07
+
+- `sn_set_field` can no longer freeze a run. It used to call `g_form.setValue` inside the injected
+  script, so the field's own change handler ran there too. On the Dictionary Entry form, picking a
+  Type rebuilds the form, the script never returned, and the run sat on "Querying ServiceNow…" until
+  Stop. The tool now finds the frame that holds the form, queues the change, and reads it back with a
+  10-second limit. The result says `reloaded` when the form rebuilt itself (look the page up again)
+  and `blocked` when a dialog is probably open (look before retrying).
+- `set_reference_field` waits up to 3 seconds for ServiceNow to fill the hidden value after a
+  suggestion click. A slow instance used to make a good pick look like "did NOT commit".
+- New suite: `sn-set-field.test.mjs`.
+
+## 0.2.26 to 0.2.31 — 2026-09-22 to 2026-10-01
+
+- Model lists follow the current releases: GPT-6.1 Sol replaces GPT-5.6 Sol, Claude Opus and Sonnet
+  5.5 replace 5, and the picker shows model ids plus Auto.
+- Paper-trading pack instructions updated to match the service's current entry rules.
+- The Inbox triage and reply drafter is switched off for now and hidden in Settings. Anyone who had
+  turned it on keeps the rule that sending mail needs their exact approval.
+- The public source skipped these versions; this release brings it level with the download.
+
 ## 0.2.25 — 2026-09-19
 
 - Settings page fix. A packaging step had dropped a closing `</code>` tag from `options.html`, so the

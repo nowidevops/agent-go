@@ -85,10 +85,11 @@ function t(name, cond, detail) {
 
 // --- model ids: Fable 5.1 default + retired-id alias (2026-09-01 rename) ---
 {
+  t("saved claude-opus-5 maps to Opus 5.5 (2026-09-22)", normalizeSubModel("claude-opus-5") === "claude-opus-5-5");
   t("default sub model is the real Fable 5.1 id (dash, no dot)", CLAUDE_SUB_DEFAULT_MODEL === "claude-fable-5-1");
   t("retired claude-fable-5 stored in settings maps to the successor", normalizeSubModel("claude-fable-5") === "claude-fable-5-1");
   t("dotted product-name id maps to the successor", normalizeSubModel("claude-fable-5.1") === "claude-fable-5-1");
-  t("non-aliased ids pass through untouched", normalizeSubModel("claude-opus-5") === "claude-opus-5" && normalizeSubModel(undefined) === undefined);
+  t("non-aliased ids pass through untouched", normalizeSubModel("claude-opus-5-5") === "claude-opus-5-5" && normalizeSubModel(undefined) === undefined);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

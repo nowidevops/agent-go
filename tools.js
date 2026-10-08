@@ -54,7 +54,7 @@ export const TOOLS = [
     type: "function",
     function: {
       name: "sn_api_reference",
-      description: "Look up the OFFICIAL ServiceNow API Reference (C:\\redacted\\path's authoritative API documentation) ON DEMAND, in any phase. Use it whenever you are unsure how a ServiceNow API method, class, table field, or event actually behaves — a method signature, whether a method exists, valid event names, a GlideRecord/GlideAjax/RESTMessageV2/g_form usage, etc. Pass a free-text `query` naming the API/method/class/table/event (e.g. 'GlideAggregate', 'g_form.getReference', 'RESTMessageV2', 'business rule current.update') or an artifact type. It returns authoritative reference text that OVERRIDES your training memory — prefer it over recollection and cite it when asserting how an API behaves. Use query 'index' to see which references are available. This is a READ-ONLY reference lookup; it does not touch the instance.",
+      description: "Look up the OFFICIAL ServiceNow API Reference (<local path> — the vendor's authoritative API documentation) ON DEMAND, in any phase. Use it whenever you are unsure how a ServiceNow API method, class, table field, or event actually behaves — a method signature, whether a method exists, valid event names, a GlideRecord/GlideAjax/RESTMessageV2/g_form usage, etc. Pass a free-text `query` naming the API/method/class/table/event (e.g. 'GlideAggregate', 'g_form.getReference', 'RESTMessageV2', 'business rule current.update') or an artifact type. It returns authoritative reference text that OVERRIDES your training memory — prefer it over recollection and cite it when asserting how an API behaves. Use query 'index' to see which references are available. This is a READ-ONLY reference lookup; it does not touch the instance.",
       parameters: {
         type: "object",
         properties: {
@@ -338,7 +338,7 @@ export const TOOLS = [
     type: "function",
     function: {
       name: "sn_set_field",
-      description: "SET any classic ServiceNow form field via the form's OWN g_form.setValue() — the RELIABLE way to populate REFERENCE, GLIDE_LIST (list collector / slushbucket, e.g. Catalogs / Watch list / Groups), CHOICE, and plain fields. It drives the authoritative model directly, so there is NO fighting the slushbucket DOM, NO 'Lookup using list' popup window, NO autocomplete race — the field is set and verified instantly. For a REFERENCE or GLIDE_LIST field, `value` MUST be the target record's sys_id(s) and `display` the shown name(s): first get the sys_id with sn_query_session on the reference table (e.g. sc_catalog for Catalogs, sys_user for a user), then call this. For a CHOICE field pass the choice value; for a plain field pass the text. Use sn_form_fields first if you don't know the field names/types. This is how you build a record end-to-end without getting stuck on a widget.",
+      description: "SET any classic ServiceNow form field via the form's OWN g_form.setValue() — the RELIABLE way to populate REFERENCE, GLIDE_LIST (list collector / slushbucket, e.g. Catalogs / Watch list / Groups), CHOICE, and plain fields. It drives the authoritative model directly, so there is NO fighting the slushbucket DOM, NO 'Lookup using list' popup window, NO autocomplete race — the field is set and verified instantly. For a REFERENCE or GLIDE_LIST field, `value` MUST be the target record's sys_id(s) and `display` the shown name(s): first get the sys_id with sn_query_session on the reference table (e.g. sc_catalog for Catalogs, sys_user for a user), then call this. For a CHOICE field pass the choice value; for a plain field pass the text. Use sn_form_fields first if you don't know the field names/types. This is how you build a record end-to-end without getting stuck on a widget. Some fields REBUILD the form when set (Dictionary Entry 'Type', Table; Type takes the type name, e.g. value 'boolean' + display 'True/False'): when the result says reloaded:true, query_elements again because old handles are stale. If it returns blocked:true, a dialog is open: look at the page, do NOT call it again blindly.",
       parameters: {
         type: "object",
         properties: {
@@ -768,11 +768,11 @@ export const TOOLS = [
     type: "function",
     function: {
       name: "read_pdf",
-      description: "Read a PDF and return its REAL text. Works on (1) a web URL: direct https://…​.pdf, or the chrome-extension://… viewer URL of the current PDF tab (unwrapped automatically); (2) a LOCAL FILE by absolute path (C:\redacted\path); and (3) a file in a connected 📁 Local files (MCP) folder by its RELATIVE path exactly as list_files shows it (e.g. 'Records/scan.pdf') — for (2) and (3) the desktop-server extracts the text with PyMuPDF and automatically OCRs scanned pages with Tesseract, so even image-only PDFs return exact text (needs the desktop-server running). PREFER this over scrolling+screenshotting a PDF preview (email attachments: download or use the saved copy, then read_pdf its local path — ONE call replaces dozens of screenshots), and use it when read_file returns garbled/unreadable PDF content. Read-only.",
+      description: "Read a PDF and return its REAL text. Works on (1) a web URL: direct https://…​.pdf, or the chrome-extension://… viewer URL of the current PDF tab (unwrapped automatically); (2) a LOCAL FILE by absolute path (<local path>); and (3) a file in a connected 📁 Local files (MCP) folder by its RELATIVE path exactly as list_files shows it (e.g. 'Records/scan.pdf') — for (2) and (3) the desktop-server extracts the text with PyMuPDF and automatically OCRs scanned pages with Tesseract, so even image-only PDFs return exact text (needs the desktop-server running). PREFER this over scrolling+screenshotting a PDF preview (email attachments: download or use the saved copy, then read_pdf its local path — ONE call replaces dozens of screenshots), and use it when read_file returns garbled/unreadable PDF content. Read-only.",
       parameters: {
         type: "object",
         properties: {
-          url: { type: "string", description: "The PDF to read: a direct https://…​.pdf, a chrome-extension://…/https://…​.pdf viewer URL, an ABSOLUTE local path (C:\\redacted\\path), or a path RELATIVE to a connected 📁 Local files (MCP) folder (Records/scan.pdf)." },
+          url: { type: "string", description: "The PDF to read: a direct https://…​.pdf, a chrome-extension://…/https://…​.pdf viewer URL, an ABSOLUTE local path (<local path>), or a path RELATIVE to a connected 📁 Local files (MCP) folder (Records/scan.pdf)." },
           max_chars: { type: "integer", description: "Max characters of text to return (default 12000)." }
         },
         required: ["url"]
@@ -2754,7 +2754,7 @@ async function settleIfLoading(tabId, graceMs = LOAD_BUDGETS.readGrace) {
 // server: nothing is hung, and a reload restarts the slow request from zero.
 const STILL_LOADING_MSG = "The page is STILL LOADING — the server has not finished sending it (a slow server, not a hung page), so nothing on it is readable yet. The tool did NOT complete. Do NOT reload (that restarts the slow request from zero) and do not assume anything about the page. Wait, then retry the SAME tool; if it is still loading after that, report the page as not responding (never finished loading).";
 
-// --- ServiceNow classic-navigation self-heal (2026-08-02, live INC0012345 run
+// --- ServiceNow classic-navigation self-heal (2026-08-02, live a ticket run
 // on customer-dev: a bare sys_assignment_rule_list.do rendered ServiceNow's "Page
 // not found" page, and the agent burned 6 tool calls — re-read of an unchanged
 // page, a wrapper guess, then sys_db_object label-browsing — before the list
@@ -2898,7 +2898,7 @@ export async function executeTool(name, args = {}, ctx = {}) {
     return await webSearchLive(args.query, args.limit, ctx);
   }
 
-  // Authoritative ServiceNow API Reference lookup (C:\redacted\path) — a read-only doc
+  // Authoritative ServiceNow API Reference lookup (<local path>) — a read-only doc
   // fetch, no active tab required. Available in every tool-capable phase so all
   // models share one source of truth (gates get the same corpus by injection).
   if (name === "sn_api_reference") {
@@ -3049,7 +3049,7 @@ export async function executeTool(name, args = {}, ctx = {}) {
     try { ({ text } = await extractDocumentText(bytes, ".pdf")); }
     catch (e) { return { error: `read_pdf: could not extract text from ${url} — ${e.message}` }; }
     if (!text || !text.trim()) {
-      return { error: `read_pdf: ${url} has no extractable text layer (likely a scanned/image-only PDF). If you have (or can download) a LOCAL copy, call read_pdf with its full local path (C:\\redacted\\path) — the desktop-server OCRs scanned pages with Tesseract. Otherwise open it in a tab and capture_screenshot.` };
+      return { error: `read_pdf: ${url} has no extractable text layer (likely a scanned/image-only PDF). If you have (or can download) a LOCAL copy, call read_pdf with its full local path (<local path>) — the desktop-server OCRs scanned pages with Tesseract. Otherwise open it in a tab and capture_screenshot.` };
     }
     const c = Number.isFinite(cap) ? cap : 12000;
     return {
@@ -3081,14 +3081,14 @@ export async function executeTool(name, args = {}, ctx = {}) {
       let resp;
       try { resp = await chrome.runtime.sendMessage({ type: "fs_op", op: "read_file_bytes", args: { path: url } }); }
       catch { resp = null; }
-      if (!resp) return { error: `read_pdf: "${url}" is not a web URL or an absolute local path, and no connected 📁 Local files (MCP) folder answered for it (the side panel must be open with the folder that holds it connected — or pass the file's FULL absolute path such as C:\\redacted\\path).` };
+      if (!resp) return { error: `read_pdf: "${url}" is not a web URL or an absolute local path, and no connected 📁 Local files (MCP) folder answered for it (the side panel must be open with the folder that holds it connected — or pass the file's FULL absolute path such as <local path>).` };
       if (resp.error) return { error: `read_pdf: could not load "${url}" from the connected folder — ${resp.error}` };
       if (!/\.pdf$/i.test(resp.name || "")) return { error: `read_pdf: "${url}" is not a .pdf — use read_file for ${resp.name}.` };
       const out = await desktopPdfText(ctx.settings, { base64: resp.base64, name: resp.name, display: url }, args.max_chars);
       if (out.error) return out;
       return { root: resp.root, ...out, source: "connected folder → desktop-server (PyMuPDF + Tesseract OCR)" };
     }
-    if (kind !== "http") return { error: "read_pdf needs a full http(s) PDF URL, a chrome-extension viewer URL that wraps one, an absolute LOCAL path like C:\\redacted\\path) folder like Records/scan.pdf (local paths and connected folders need the desktop-server running)." };
+    if (kind !== "http") return { error: "read_pdf needs a full http(s) PDF URL, a chrome-extension viewer URL that wraps one, an absolute LOCAL path like <local path> or a path relative to a connected 📁 Local files (MCP) folder like Records/scan.pdf (local paths and connected folders need the desktop-server running)." };
     let res;
     try { res = await fetch(url, { method: "GET", redirect: "follow", signal: ctx.signal }); }
     catch (e) { if (e && e.name === "AbortError") throw e; return { error: `read_pdf could not reach ${url}: ${e.message}` }; }

@@ -83,10 +83,14 @@ function patchSettings(partial) {
 
 // Mirrors functions/src/modules/llm-go/model-allowlist.js; the server still decides. Free and Starter
 // get the included models only; every other signed-in plan gets the whole catalog.
+// 2026-09-29: the openaiHosted catalog group added gpt-5-nano (CHEAP: every plan) and
+// gpt-6-luna (MID: Starter and up), so Free and Starter each get their own extras.
 const PLAN_INCLUDED = new Set(["glm-5.2:cloud", "glm-5.3-flash", "gemma4:31b"]);
+const PLAN_EXTRA = { free: ["gpt-5-nano"], starter: ["gpt-5-nano", "gpt-6-luna"] };
 function planAllows(tier, model) {
   if (!model) return true;
-  if (!tier || tier === "free" || tier === "starter") return PLAN_INCLUDED.has(model);
+  if (!tier) return PLAN_INCLUDED.has(model);
+  if (tier === "free" || tier === "starter") return PLAN_INCLUDED.has(model) || PLAN_EXTRA[tier].includes(model);
   return true;
 }
 

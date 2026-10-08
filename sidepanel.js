@@ -80,7 +80,7 @@ let isAdmin = false;
     const token = await getAuthToken();
     const res = await fetch(`${String(s.backendUrl || "").replace(/\/$/, "")}/me`, { headers: { Authorization: `Bearer ${token}` } });
     if (res.ok) { const me = await res.json(); isAdmin = me && me.tier === "admin"; }
-    seedDefaultShortcuts().catch(() => {}); // one-time UAT starter /commands, gated to maintainer@example.com
+    seedDefaultShortcuts().catch(() => {}); // one-time UAT starter /commands, admin accounts only
   } catch (_e) { isAdmin = false; } // fail closed (now only gates the admin-only menu items, e.g. Conversation log)
   applyAdminGating();
 })();
@@ -783,7 +783,7 @@ async function regrantLapsed(lapsed, preferNames = []) {
 }
 
 // Folder names the task text refers to — a path like
-// C:\redacted\path
+// <local path> Files\1 RESEARCH\STRY0000001_RESEARCH names the connected root by
 // its last segment, and a bare folder name counts too.
 function rootNamesMentioned(text, roots) {
   const t = String(text || "").toLowerCase();

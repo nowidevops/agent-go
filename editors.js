@@ -621,18 +621,126 @@ async function runMainAllFramesArgs(tabId, func, args) {
       || (results || []).map((r) => r && r.result).find(Boolean) || null;
 }
 
+// HANG FIX (2026-10-07, live run on a Dictionary Entry form): setValue ran
+// SYNCHRONOUSLY inside the injected script, so the field's onChange ran inside it
+// too. On the Dictionary Entry form, picking a Type makes the form rebuild itself
+// (and some onChange handlers open a confirm()); the injection never settled and
+// nothing had a deadline, so the run sat on "Querying ServiceNow…" until Stop.
+// Now: probe for the g_form frame (bounded), queue setValue on a timer in THAT
+// frame so the injection returns before onChange runs, then read the value back in
+// a second bounded call. No answer = blocked (dialog) or reloading, and we say so.
+const SN_SET_FIELD_TIMEOUT_MS = 10000;
+const SN_SET_FIELD_SETTLE_MS = 1200;
+const SN_SET_FIELD_BLOCKED = "Do NOT call sn_set_field again until the page responds: capture_screenshot or read_page to see what is open, click the dialog's button (or tell the user), then check the field's current value before setting it again.";
+
+function pageSnSetFieldProbe(field) {
+  try {
+    var gf = window.g_form;
+    if (!gf || typeof gf.setValue !== "function") return { hasGform: false };
+    // g_form uses the BARE field name (no "<table>." prefix) — strip it if present.
+    var f = String(field || "");
+    if (f.indexOf(".") !== -1) f = f.split(".").pop();
+    var present = false;
+    try { present = gf.hasField ? gf.hasField(f) : !!gf.getControl(f); } catch (e) {}
+    if (!present) {
+      var names; try { names = gf.getFieldNames ? gf.getFieldNames() : undefined; } catch (e) {}
+      return { hasGform: true, missing: true, field: f, available_fields: names };
+    }
+    var mandatory = false; try { mandatory = gf.isMandatory ? gf.isMandatory(f) : false; } catch (e) {}
+    return { hasGform: true, field: f, mandatory: mandatory };
+  } catch (e) { return { hasGform: false }; }
+}
+
+function pageSnSetFieldQueue(f, value, display, append) {
+  try {
+    var gf = window.g_form;
+    if (!gf || typeof gf.setValue !== "function") return { ok: false, error: "g_form vanished before the value could be set" };
+    var v = value == null ? "" : String(value);
+    var cur = ""; try { cur = gf.getValue(f) || ""; } catch (e) {}
+    // glide_list append: union the existing sys_ids with the new one(s), de-duped.
+    if (append) {
+      var seen = {}, out = [];
+      (cur ? cur.split(",") : []).concat(v ? v.split(",") : []).forEach(function (x) {
+        x = (x || "").trim(); if (x && !seen[x]) { seen[x] = 1; out.push(x); }
+      });
+      v = out.join(",");
+    }
+    window.__lcSnSetFieldError = null;
+    setTimeout(function () {
+      try {
+        if (display != null && String(display) !== "") gf.setValue(f, v, String(display));
+        else gf.setValue(f, v);
+      } catch (e) { window.__lcSnSetFieldError = "g_form.setValue('" + f + "') failed: " + String((e && e.message) || e); }
+    }, 0);
+    return { ok: true, before: cur, want: v };
+  } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
+}
+
+function pageSnSetFieldRead(f) {
+  try {
+    var gf = window.g_form;
+    if (!gf) return { gone: true };
+    var after = null, disp = null;
+    try { after = gf.getValue(f); } catch (e) {}
+    try { disp = gf.getDisplayValue ? gf.getDisplayValue(f) : null; } catch (e) {}
+    return { value: after, display: disp, error: window.__lcSnSetFieldError || null };
+  } catch (e) { return { error: String((e && e.message) || e) }; }
+}
+
 export async function setServiceNowField(tabId, { field, value, display, append } = {}) {
   if (!field) return { ok: false, error: "sn_set_field requires a 'field' (the field name, e.g. sc_catalogs)." };
-  const r = await runMainAllFramesArgs(tabId, pageSnSetField, [
-    String(field), value == null ? "" : String(value), display == null ? null : String(display), !!append
-  ]);
-  if (r && r.error && !r.hasGform) return { ok: false, error: r.error };
-  if (!r || !r.hasGform) {
+  let probe;
+  try {
+    probe = await snWithDeadline(
+      chrome.scripting.executeScript({ target: { tabId, allFrames: true }, world: "MAIN", func: pageSnSetFieldProbe, args: [String(field)] }),
+      SN_SET_FIELD_TIMEOUT_MS, "__timeout__"
+    );
+  } catch (e) { return { ok: false, error: `Cannot reach the page: ${e.message}` }; }
+  if (probe === "__timeout__") {
+    return { ok: false, blocked: true, error: "The page did not answer within 10s. It is probably blocked by an open dialog (alert/confirm) or still reloading. " + SN_SET_FIELD_BLOCKED };
+  }
+  const frames = (probe || []).filter((p) => p && p.result && p.result.hasGform);
+  if (!frames.length) {
     return { ok: false, error: "No ServiceNow classic form found (g_form is not present). sn_set_field works on a CLASSIC form (…/<table>.do). Open the record's classic form and retry." };
   }
-  if (r.error) return { ok: false, error: r.error, available_fields: r.available_fields };
+  const hit = frames.find((p) => !p.result.missing) || frames[0];
+  const f = hit.result.field;
+  if (hit.result.missing) return { ok: false, error: "field '" + f + "' is not on this form", available_fields: hit.result.available_fields };
+  const frameId = hit.frameId == null ? 0 : hit.frameId;
+
+  let queued;
+  try {
+    queued = await snWithDeadline(
+      chrome.scripting.executeScript({ target: { tabId, frameIds: [frameId] }, world: "MAIN", func: pageSnSetFieldQueue,
+        args: [f, value == null ? "" : String(value), display == null ? null : String(display), !!append] }),
+      SN_SET_FIELD_TIMEOUT_MS, "__timeout__"
+    );
+  } catch (e) { return { ok: false, error: `Cannot reach the page: ${e.message}` }; }
+  if (queued === "__timeout__") return { ok: false, blocked: true, field: f, error: "The form frame did not answer within 10s (open dialog or reload). " + SN_SET_FIELD_BLOCKED };
+  const q = queued && queued[0] && queued[0].result;
+  if (!q || !q.ok) return { ok: false, field: f, error: (q && q.error) || "Could not queue the value on the form." };
+
+  await new Promise((r) => setTimeout(r, SN_SET_FIELD_SETTLE_MS));
+  let read = null;
+  try {
+    read = await snWithDeadline(
+      chrome.scripting.executeScript({ target: { tabId, frameIds: [frameId] }, world: "MAIN", func: pageSnSetFieldRead, args: [f] }),
+      SN_SET_FIELD_TIMEOUT_MS, "__timeout__"
+    );
+  } catch { read = null; }   // frame gone = the form reloaded/navigated
+  if (read === "__timeout__") {
+    return { ok: false, blocked: true, field: f, error: `'${f}' was set, but the form stopped answering right after: its onChange most likely opened a dialog (confirm/alert) or is reloading the form. ` + SN_SET_FIELD_BLOCKED };
+  }
+  const r = read && read[0] && read[0].result;
+  if (!r || r.gone) {
+    return { ok: true, field: f, reloaded: true, mandatory: hit.result.mandatory, note: `Set '${f}'. The form reloaded afterwards (normal for fields such as the Dictionary Entry 'Type', which rebuilds the form). Element handles from before are stale: read_page / query_elements again, and confirm '${f}' kept its value before saving.` };
+  }
+  if (r.error) return { ok: false, field: f, error: r.error };
+  if (String(r.value ?? "").trim().toLowerCase() !== String(q.want).trim().toLowerCase()) {
+    return { ok: false, field: f, value: r.value, display: r.display, value_before: q.before, error: `After setValue, '${f}' holds '${r.value}' instead of '${q.want}'. For a reference/glide_list pass the STORED value (usually the sys_id; for the Dictionary Entry 'Type' it is the type name such as 'boolean') plus display. Check the form before retrying.` };
+  }
   return {
-    ok: true, field: r.field, value: r.value, display: r.display, mandatory: r.mandatory,
+    ok: true, field: f, value: r.value, display: r.display, mandatory: hit.result.mandatory,
     note: "Set via g_form.setValue and verified. For a reference/glide_list, `value` MUST be the sys_id(s) and `display` the name(s) — get the sys_id with sn_query_session on the reference table first. Then save_record."
   };
 }

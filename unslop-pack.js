@@ -1,5 +1,5 @@
 // unslop-pack.js — writing-quality pack that strips AI tells from final prose.
-// Condensed from the canonical skill at C:\redacted\path
+// Condensed from the canonical skill at <local path> (also installed
 // globally at <local path>). ALWAYS-ON by owner directive
 // (2026-08-19): unlike the domain packs this one injects on every run, because
 // nearly every run ends in prose the owner may ship. Kept compact (~2KB) per

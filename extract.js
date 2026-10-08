@@ -428,7 +428,7 @@ export function pdfUrlFromViewer(url) {
 // PDF REFERENCE CLASSIFIER (2026-09-07c, Records-folder run): where does a
 // read_pdf `url` point?
 //   "http"   — a web URL (https://…/file.pdf)
-//   "local"  — an ABSOLUTE local path (C:\redacted\path
+//   "local"  — an ABSOLUTE local path (<local path> \\server\share\f.pdf,
 //              or a file: URL) — the desktop-server opens it by path
 //   "folder" — a path RELATIVE to a connected 📁 Local files (MCP) folder
 //              ("Records/scan.pdf", "scan.pdf") — the side panel supplies the

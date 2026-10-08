@@ -2326,7 +2326,19 @@ async function setReferenceField(handle, value, optionText) {
   for (const t of ["mousedown", "mouseup", "click"]) {
     pick.el.dispatchEvent(new win.MouseEvent(t, { bubbles: true, cancelable: true, view: win }));
   }
-  await new Promise((r) => setTimeout(r, 400));
+  // ServiceNow fills the hidden value over AJAX after the click, so on a slow
+  // instance a single 400ms read came back EMPTY and the tool called a good
+  // commit a failure (2026-10-07, the Dictionary Entry Type field: the
+  // agent then fell back to sn_set_field, which hung). Poll up to ~3s for it.
+  {
+    const commitDeadline = Date.now() + 3000;
+    do {
+      await new Promise((r) => setTimeout(r, 250));
+      if (!hiddenEl) break;
+      const v = hiddenEl.value;
+      if (v !== "" && (v !== committedBefore || v.trim().toLowerCase() === want)) break;
+    } while (Date.now() < commitDeadline);
+  }
 
   // Verify the commit. ServiceNow pairs 'sys_display.<table>.<field>' (visible)
   // with '<table>.<field>' (hidden value holder — a sys_id for real references,
@@ -2356,7 +2368,7 @@ async function setReferenceField(handle, value, optionText) {
     return {
       ...base,
       ok: false,
-      error: `Suggestion click did NOT commit: the hidden value is ${committed === "" ? "EMPTY" : `still "${committed}"`} while the display shows "${el.value}". The display text can lie — do not trust it. Retry set_reference_field (use option_text with an EXACT entry from get_reference_suggestions), and re-verify before saving.`
+      error: `Suggestion click did NOT commit: the hidden value is ${committed === "" ? "EMPTY" : `still "${committed}"`} while the display shows "${el.value}". The display text can lie — do not trust it. Retry set_reference_field ONCE (use option_text with an EXACT entry from get_reference_suggestions). If it fails again and you know the stored value, use sn_set_field with the stored value plus its display text instead (sys_id for normal references; for the Dictionary Entry 'Type' the type name, e.g. 'boolean'). Re-verify before saving.`
     };
   }
   return { ...base, ok: true };

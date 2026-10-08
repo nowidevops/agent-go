@@ -56,7 +56,7 @@ initNetLog();
 // Build marker — bump on each change so you can confirm in the service-worker
 // console (chrome://extensions → "service worker") that a reload actually picked
 // up the new code. If you don't see this line after reloading, the worker is stale.
-const BUILD_TAG = "AGENT GO 0.2.25 — open-source release";
+const BUILD_TAG = "AGENT GO 0.2.32 — open-source release";
 console.log("[Local LLM] background.js loaded — build " + BUILD_TAG);
 
 // Race a promise against the run's AbortSignal so a hung awaited operation can be
@@ -1011,7 +1011,7 @@ async function runAgent(history, post, signal, attachments, askApproval, modelOv
     const _multi = _roots.length > 1;
     const _names = _roots.map((r) => `"${r.name}"`).join(", ");
     const _openLine = _multi
-      ? `\n\nCONNECTED LOCAL FOLDERS (Filesystem MCP — ground truth): ${_roots.length} local folders are connected — ${_roots.map((r) => `"${r.name}" (read${r.canWrite ? "/write" : "-only"})`).join(", ")}. The \`list_files\`/\`read_file\` (and organize/write) tools work across ALL of them, but a path must say WHICH folder: PREFIX it with the folder NAME — e.g. read_file "${_roots[0].name}/README.md", list_files "${_roots[0].name}", search_files with path "${_roots[0].name}". A bare path with NO folder prefix is AMBIGUOUS and will error — always include the prefix. \`list_files\` with NO path lists the connected folder names. A Windows path in the task (e.g. C:\\redacted\\path\\<FolderName>\\file.md) maps to the connected folder whose NAME is its last segment: write to "<FolderName>/file.md". `
+      ? `\n\nCONNECTED LOCAL FOLDERS (Filesystem MCP — ground truth): ${_roots.length} local folders are connected — ${_roots.map((r) => `"${r.name}" (read${r.canWrite ? "/write" : "-only"})`).join(", ")}. The \`list_files\`/\`read_file\` (and organize/write) tools work across ALL of them, but a path must say WHICH folder: PREFIX it with the folder NAME — e.g. read_file "${_roots[0].name}/README.md", list_files "${_roots[0].name}", search_files with path "${_roots[0].name}". A bare path with NO folder prefix is AMBIGUOUS and will error — always include the prefix. \`list_files\` with NO path lists the connected folder names. A Windows path in the task (e.g. <local path>) maps to the connected folder whose NAME is its last segment: write to "<FolderName>/file.md". `
       : `\n\nCONNECTED LOCAL FOLDER (Filesystem MCP — ground truth): a local folder named "${_roots[0].name}" is mounted read${_roots[0].canWrite ? "/write" : "-only"} and you can read it with the \`list_files\` and \`read_file\` tools (paths are RELATIVE to this root). `;
     systemPrompt += _lapsedLine + _openLine +
       `read_file handles MORE than text/code: PDFs, Word (.docx), Excel (.xlsx), PowerPoint (.pptx) and RTF files have their TEXT extracted, and images (.png/.jpg/...) are DESCRIBED via the vision model — so to summarize or answer about such a file, just read_file it. NEVER claim binary files in this folder are unreadable. ` +
@@ -1035,9 +1035,9 @@ async function runAgent(history, post, signal, attachments, askApproval, modelOv
         ? ` You can RUN shell commands with \`run_command\` (npm/git/tests/builds${settings.projectDir ? `, cwd defaults to ${settings.projectDir}` : ""}) — after editing code, RUN the tests/build to VERIFY your change actually works before claiming done. Use git through run_command (git status/diff/add/commit).`
         : ``) +
       // TWO-FOLDER PRECISION (2026-07-22, live a-live-run: the model was asked
-      // "do you have access to C:\\redacted\\path" and vaguely claimed the connected
+      // "do you have access to <local path> Files" and vaguely claimed the connected
       // root WAS "your project folder" — but the file tools were mounted on SN_REF,
-      // while run_command's cwd was C:\\redacted\\path). Teach the
+      // while run_command's cwd was <local path> Files, a DIFFERENT folder). Teach the
       // model the two surfaces so it answers access questions accurately.
       `\n\nTWO SEPARATE FOLDER SURFACES — answer access questions PRECISELY, do not conflate them: the FILE tools (list_files, read_file, edit_file, write_file, search_files, move_file, create_folder, …) reach ONLY the connected Filesystem-MCP folder(s) ${_names}${_multi ? " (prefix the folder name)" : ""} — nothing else.` +
       (settings.commandExecEnabled && settings.projectDir
@@ -1206,7 +1206,7 @@ async function runAgent(history, post, signal, attachments, askApproval, modelOv
   // Policy-excluded SN instance: say so UP FRONT every turn. The call-time sn_* error
   // alone doesn't persist across turns — the model re-tried excluded tools at the start
   // of each new user message (2026-07-09 session: 5 wasted calls). One line here ends that.
-  // (2026-08-02 INC0012345 run: the old blanket "do NOT call any sn_* tool" line
+  // (2026-08-02 a ticket run: the old blanket "do NOT call any sn_* tool" line
   // also banned the SESSION-based tools — sn_query_session / sn_check_duplicate /
   // sn_set_field — which run through the logged-in tab's g_ck token and need NO
   // credentials, so they work fine on excluded instances. The agent obeyed the
@@ -1411,8 +1411,14 @@ async function runAgent(history, post, signal, attachments, askApproval, modelOv
   // delete or label. The exact "APPROVED — SEND IT" phrase is the only send path,
   // and the send_email / send_sms tools are blocked in code for this run unless
   // the latest user message carries that phrase (ctx.inboxDrafter, per-call loop).
-  let inboxDrafter = false; // set below when the pack is in the prompt; agentLoop reads ctx.inboxDrafter (send gate)
-  if (settings.inboxPackEnabled && needsInboxPack(tabUrl)) {
+  // The send gate stays tied to the saved setting even while the pack is tabled, so a user who had
+  // opted in keeps the 0.2.30 rule on mail tabs: send_email / send_sms need the exact approval phrase
+  // (MM free-0.2.31 M1).
+  let inboxDrafter = !!(settings.inboxPackEnabled && needsInboxPack(tabUrl)); // agentLoop reads ctx.inboxDrafter (send gate)
+  // Email features tabled (owner 2026-10-01): the Inbox drafter pack is off for everyone until
+  // INBOX_PACK_AVAILABLE is set back to true (the Settings toggle is hidden too).
+  const INBOX_PACK_AVAILABLE = false;
+  if (INBOX_PACK_AVAILABLE && settings.inboxPackEnabled && needsInboxPack(tabUrl)) {
     try {
       systemPrompt += "\n\n" + INBOX_PACK;
       inboxDrafter = true;

@@ -4,7 +4,7 @@ Agent Go is a browser agent for ServiceNow and everyday web work. It reads the p
 on, calls tools, and acts on your behalf. Inference runs on the Agentic Copilot service, so there is
 nothing to install besides this extension — no local models, no API keys.
 
-Version: 0.2.22   Built: 2026-09-15   (same text as https://ai.nowidevops.com/agent-go.html)
+Version: 0.2.32   Built: 2026-10-07   (same text as https://ai.nowidevops.com/agent-go.html)
 
 ## Requirements
 

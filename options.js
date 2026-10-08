@@ -84,8 +84,10 @@ const BYOK_MODELS = {
   // gpt-6-astra added 2026-09-05 (released 09-03/05; live-verified on /v1/models). The Agent Go
   // service routes the GPT-6 family through /v1/responses — chat-completions refuses function
   // tools for it (functions/src/modules/llm-go/sdk-dispatch.js usesResponsesApi).
-  openai: ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5-mini", "gpt-5-nano"],
-  anthropic: ["claude-fable-5-1", "claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"], // claude-fable-5 retired → fable-5-1 (2026-09-01)
+  // 2026-09-29 (owner-approved model map, an internal review): gpt-6.1-sol replaced gpt-5.6-sol, gpt-6-luna replaced
+  // gpt-5.6-luna + gpt-5-mini; gpt-6-astra-ultrafast = Astra on the Ultrafast tier (6x price), BYOK only.
+  openai: ["gpt-6-astra", "gpt-6-astra-ultrafast", "gpt-6.1-sol", "gpt-5.6-terra", "gpt-6-luna", "gpt-5-nano"],
+  anthropic: ["claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-4-5"], // claude-fable-5 retired → fable-5-1 (2026-09-01) · opus-5/sonnet-5 → 5-5 (2026-10-01)
   gemini: ["gemini-3.1-pro-preview", "gemini-3.8-flash", "gemini-flash-latest", "gemini-flash-lite-latest"],
   xai: ["grok-4.5", "grok-4-1-fast-reasoning"],
   // custom: same curated list as Local LLM's Custom provider (cloud.js), plus a few direct-vendor ids.
@@ -543,9 +545,9 @@ const PHASE_PRESETS = {
   // $0); Gemini as an independent visual/multimodal lens; glm tail.
   uiux: {
     roles: {
-      orchestrator: [{ provider: "claude-sub", model: "claude-fable-5-1" }, { provider: "claude-sub", model: "claude-opus-5" }],
-      review: [{ provider: "claude-sub", model: "claude-opus-5" }, { provider: "gemini", model: "gemini-3.1-pro-preview" }, O("glm-5.2:cloud")],
-      reverify: [{ provider: "claude-sub", model: "claude-sonnet-5" }, O("glm-5.2:cloud")]
+      orchestrator: [{ provider: "claude-sub", model: "claude-fable-5-1" }, { provider: "claude-sub", model: "claude-opus-5-5" }],
+      review: [{ provider: "claude-sub", model: "claude-opus-5-5" }, { provider: "gemini", model: "gemini-3.1-pro-preview" }, O("glm-5.2:cloud")],
+      reverify: [{ provider: "claude-sub", model: "claude-sonnet-5-5" }, O("glm-5.2:cloud")]
     },
     maxRepairs: 3, gateWallSec: 360
   },
@@ -554,8 +556,8 @@ const PHASE_PRESETS = {
   fitness: {
     roles: {
       orchestrator: [{ provider: "gemini", model: "gemini-3.1-pro-preview" }, { provider: "claude-sub", model: "claude-fable-5-1" }],
-      review: [{ provider: "claude-sub", model: "claude-opus-5" }, { provider: "gemini", model: "gemini-3.1-pro-preview" }, O("deepseek-v4-pro:0813-cloud")],
-      reverify: [{ provider: "gemini", model: "gemini-3.1-pro-preview" }, { provider: "claude-sub", model: "claude-opus-5" }]
+      review: [{ provider: "claude-sub", model: "claude-opus-5-5" }, { provider: "gemini", model: "gemini-3.1-pro-preview" }, O("deepseek-v4-pro:0813-cloud")],
+      reverify: [{ provider: "gemini", model: "gemini-3.1-pro-preview" }, { provider: "claude-sub", model: "claude-opus-5-5" }]
     },
     maxRepairs: 3, gateWallSec: 360
   },
@@ -566,8 +568,8 @@ const PHASE_PRESETS = {
   stock: {
     roles: {
       orchestrator: [{ provider: "claude-sub", model: "claude-fable-5-1" }, { provider: "gemini", model: "gemini-3.1-pro-preview" }],
-      review: [{ provider: "claude-sub", model: "claude-opus-5" }, { provider: "gemini", model: "gemini-3.1-pro-preview" }, O("deepseek-v4-pro:0813-cloud")],
-      reverify: [{ provider: "gemini", model: "gemini-3.1-pro-preview" }, { provider: "claude-sub", model: "claude-opus-5" }]
+      review: [{ provider: "claude-sub", model: "claude-opus-5-5" }, { provider: "gemini", model: "gemini-3.1-pro-preview" }, O("deepseek-v4-pro:0813-cloud")],
+      reverify: [{ provider: "gemini", model: "gemini-3.1-pro-preview" }, { provider: "claude-sub", model: "claude-opus-5-5" }]
     },
     gateMode: "strict", maxRepairs: 4, gateWallSec: 480
   },
@@ -577,9 +579,9 @@ const PHASE_PRESETS = {
   other: {
     roles: {
       orchestrator: [{ provider: "claude-sub", model: "claude-fable-5-1" }, { provider: "gemini", model: "gemini-3.1-pro-preview" }],
-      review: [{ provider: "claude-sub", model: "claude-opus-5" }, { provider: "gemini", model: "gemini-3.1-pro-preview" }, O("deepseek-v4-pro:0813-cloud")],
-      reverify: [{ provider: "gemini", model: "gemini-3.1-pro-preview" }, { provider: "claude-sub", model: "claude-opus-5" }],
-      repair: [{ provider: "claude-sub", model: "claude-fable-5-1" }, { provider: "claude-sub", model: "claude-opus-5" }]
+      review: [{ provider: "claude-sub", model: "claude-opus-5-5" }, { provider: "gemini", model: "gemini-3.1-pro-preview" }, O("deepseek-v4-pro:0813-cloud")],
+      reverify: [{ provider: "gemini", model: "gemini-3.1-pro-preview" }, { provider: "claude-sub", model: "claude-opus-5-5" }],
+      repair: [{ provider: "claude-sub", model: "claude-fable-5-1" }, { provider: "claude-sub", model: "claude-opus-5-5" }]
     },
     maxRepairs: 5, gateWallSec: 600
   }
